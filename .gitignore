@@ -7,13 +7,15 @@ env/
 venv/
 ENV/
 
-# Data and Models
+# Data (Large datasets)
 data/
+
+# Models (Include checkpoints and artifacts)
 !models/
-models/*.pth
-models/*.pkl
-models/*.png
-models/*.json
+!models/*.pth
+!models/*.pkl
+!models/*.png
+!models/*.json
 
 # Exclude large data specifically but allow the models folder
 # Actually, I'll allow everything in models except maybe large backups
