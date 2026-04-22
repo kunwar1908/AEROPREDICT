@@ -20,16 +20,16 @@
 
 ```bash
 # Full diagnostic test
-bash /Users/devariwala/development/no10/test_environment.sh
+test_environment.cmd
 
 # Run complete pipeline
-bash /Users/devariwala/development/no10/run_pipeline.sh
+run_pipeline.cmd
 
 # Advanced training with plots
-/Users/devariwala/development/no10/.venv/bin/python /Users/devariwala/development/no10/src/train_advanced.py
+python src/train_advanced.py
 
 # Quick evaluation
-/Users/devariwala/development/no10/.venv/bin/python /Users/devariwala/development/no10/src/evaluate.py
+python src/evaluate.py
 ```
 
 ## Project Summary
@@ -54,4 +54,4 @@ bash /Users/devariwala/development/no10/run_pipeline.sh
 - `/models/training_loss.png` - Loss history
 - `/models/predictions_analysis.png` - Prediction uncertainty plots
 
-**Python Environment:** `/Users/devariwala/development/no10/.venv/bin/python`
+**Python Environment:** `.venv\Scripts\python.exe` on Windows, `.venv/bin/python` on Unix-like shells

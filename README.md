@@ -16,22 +16,22 @@ Deep learning baseline for Remaining Useful Life (RUL) prediction on the NASA C-
 
 ### 1. Refresh the official NASA data
 ```bash
-/Users/devariwala/development/no10/.venv/bin/python /Users/devariwala/development/no10/src/download_data.py
+run_pipeline.cmd
 ```
 
 ### 2. Train on FD001
 ```bash
-/Users/devariwala/development/no10/.venv/bin/python /Users/devariwala/development/no10/src/train.py --dataset FD001
+run_pipeline.cmd
 ```
 
 ### 3. Evaluate the saved checkpoint
 ```bash
-/Users/devariwala/development/no10/.venv/bin/python /Users/devariwala/development/no10/src/evaluate.py --dataset FD001
+test_environment.cmd
 ```
 
 ### 4. Run the complete pipeline
 ```bash
-bash /Users/devariwala/development/no10/run_pipeline.sh
+run_pipeline.cmd
 ```
 
 ## Model
@@ -55,7 +55,7 @@ bash /Users/devariwala/development/no10/run_pipeline.sh
 
 ## Diagnostics
 ```bash
-bash /Users/devariwala/development/no10/test_environment.sh
+test_environment.cmd
 ```
 
 ## Notes

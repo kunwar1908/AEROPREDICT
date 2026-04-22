@@ -1,10 +1,22 @@
-#!/bin/bash
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -x "$SCRIPT_DIR/.venv/Scripts/python.exe" ]]; then
+    PYTHON_BIN="$SCRIPT_DIR/.venv/Scripts/python.exe"
+elif [[ -x "$SCRIPT_DIR/.venv/bin/python" ]]; then
+    PYTHON_BIN="$SCRIPT_DIR/.venv/bin/python"
+else
+    PYTHON_BIN="python"
+fi
+
+cd "$SCRIPT_DIR"
 
 echo "================================"
 echo "System Diagnostics & Testing"
 echo "================================"
-
-PYTHON_BIN="/Users/devariwala/development/no10/.venv/bin/python"
+echo "Using Python: $PYTHON_BIN"
 
 echo ""
 echo "1. Checking Python environment..."
@@ -59,13 +71,13 @@ print(f'   ✓ Model parameters: {sum(p.numel() for p in model.parameters()):,}'
 
 echo ""
 echo "6. Testing saved checkpoint files..."
-if [ -f "/Users/devariwala/development/no10/models/lstm_rul.pth" ]; then
+if [ -f "$SCRIPT_DIR/models/lstm_rul.pth" ]; then
     echo "   ✓ Trained model found: lstm_rul.pth"
 else
     echo "   ✗ Trained model NOT found"
 fi
 
-if [ -f "/Users/devariwala/development/no10/models/scaler.pkl" ]; then
+if [ -f "$SCRIPT_DIR/models/scaler.pkl" ]; then
     echo "   ✓ Scaler found: scaler.pkl"
 else
     echo "   ✗ Scaler NOT found"
@@ -73,7 +85,7 @@ fi
 
 echo ""
 echo "7. Quick end-to-end evaluation..."
-$PYTHON_BIN src/evaluate.py --dataset FD001 --mc-samples 10
+"$PYTHON_BIN" src/evaluate.py --dataset FD001 --mc-samples 10
 
 echo ""
 echo "================================"

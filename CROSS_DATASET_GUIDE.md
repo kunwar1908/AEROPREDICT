@@ -57,6 +57,6 @@ If basic model transferring yields high RMSE, implement these advanced strategie
 
 ## 5. Assumptions
 
-*   Script execution always runs relative logic referencing `/Users/devariwala/development/no10`.
+*   Script execution now uses repo-relative logic and the local `.venv` if present.
 *   Standard piece-wise linear function variables like `max-rul` remaining at ceiling $125$ mapping accurately to target transfer mappings.
 *   Changes applied to `aerospace-dashboard` retain backward compatibility avoiding regressions for live data visual polling via explicit DOM parsing modifications.
