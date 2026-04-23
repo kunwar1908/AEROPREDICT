@@ -171,8 +171,8 @@
 <h2 class="text-3xl font-extrabold tracking-tight text-white mb-2">API Deployment Playground</h2>
 <p class="text-zinc-500 max-w-2xl">Test the AeroPredict engine integration. Send raw sensor data streams to the inference endpoint and receive remaining useful life (RUL) predictions in real-time.</p>
 </div>
-<div class="flex items-center gap-4 bg-zinc-900 p-1 rounded-lg border border-zinc-800">
-<button class="px-4 py-2 bg-orange-500 text-black font-bold text-sm rounded shadow-lg shadow-orange-500/20 flex items-center gap-2 hover:bg-orange-400 transition-all">
+<div id="api-demo-action-row" class="flex items-center gap-4 bg-zinc-900 p-1 rounded-lg border border-zinc-800">
+<button id="api-demo-send-btn" onclick="window.runApiDemoRequest && window.runApiDemoRequest()" class="px-4 py-2 bg-orange-500 text-black font-bold text-sm rounded shadow-lg shadow-orange-500/20 flex items-center gap-2 hover:bg-orange-400 transition-all">
 <span class="material-symbols-outlined text-sm" data-icon="send">send</span>
                             Send Request
                         </button>
@@ -235,7 +235,7 @@
 </div>
 </div>
 <div class="p-6 code-font text-sm leading-relaxed overflow-auto max-h-[500px]">
-<pre class="text-zinc-400">{
+<pre id="api-demo-request-block" class="text-zinc-400">{
   <span class="text-orange-500">"engine_id"</span>: <span class="text-white">"AE-7700-X1"</span>,
   <span class="text-orange-500">"timestamp"</span>: <span class="text-white">"2024-05-20T14:30:01.44Z"</span>,
   <span class="text-orange-500">"sensor_data"</span>: {
@@ -259,12 +259,12 @@
 <div class="flex flex-col border border-zinc-800 rounded-xl overflow-hidden bg-zinc-950">
 <div class="bg-zinc-900 px-4 py-3 border-b border-zinc-800 flex items-center justify-between">
 <div class="flex items-center gap-2">
-<span class="text-xs font-bold text-green-500 uppercase tracking-widest">200 OK</span>
-<span class="text-[10px] text-zinc-500 ml-2">Response Time: 12.4ms</span>
+<span id="api-demo-status-badge" class="text-xs font-bold text-green-500 uppercase tracking-widest">200 OK</span>
+<span id="api-demo-response-time" class="text-[10px] text-zinc-500 ml-2">Response Time: 12.4ms</span>
 </div>
 </div>
 <div class="p-6 code-font text-sm leading-relaxed overflow-auto max-h-[500px]">
-<pre class="text-zinc-400">{
+<pre id="api-demo-response-block" class="text-zinc-400">{
   <span class="text-orange-500">"status"</span>: <span class="text-white">"success"</span>,
   <span class="text-orange-500">"prediction"</span>: {
     <span class="text-orange-500">"predicted_rul"</span>: <span class="text-orange-500 font-bold">142</span>,
@@ -336,16 +336,12 @@
 <script>
 (() => {
     const DEFAULT_API_BASE = 'http://127.0.0.1:8000';
-    const SETTINGS_KEY = 'aeropredict-ui-settings';
 
     function getApiBase() {
-        try {
-            const parsed = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
-            const configured = String(parsed.apiBase || '').trim().replace(/\/$/, '');
-            return configured || DEFAULT_API_BASE;
-        } catch {
-            return DEFAULT_API_BASE;
+        if (window.AeroPredictUi && typeof window.AeroPredictUi.getApiBase === 'function') {
+            return window.AeroPredictUi.getApiBase();
         }
+        return DEFAULT_API_BASE;
     }
 
     function prettyJson(value) {
@@ -353,16 +349,15 @@
     }
 
     function getElements() {
-        const actionRow = document.querySelector('.flex.items-center.gap-4.bg-zinc-900');
-        const sendButton = actionRow ? actionRow.querySelector('button') : null;
-        const blocks = document.querySelectorAll('.code-font pre');
+        const actionRow = document.getElementById('api-demo-action-row');
+        const sendButton = document.getElementById('api-demo-send-btn');
         return {
             actionRow,
             sendButton,
-            requestBlock: blocks[0] || null,
-            responseBlock: blocks[1] || null,
-            responseTime: document.querySelector('.text-[10px].text-zinc-500.ml-2'),
-            statusBadge: document.querySelector('.text-xs.font-bold.uppercase.tracking-widest'),
+            requestBlock: document.getElementById('api-demo-request-block'),
+            responseBlock: document.getElementById('api-demo-response-block'),
+            responseTime: document.getElementById('api-demo-response-time'),
+            statusBadge: document.getElementById('api-demo-status-badge'),
         };
     }
 
@@ -563,6 +558,8 @@
         };
 
         elements.sendButton.addEventListener('click', run);
+        elements.sendButton.onclick = run;
+        window.runApiDemoRequest = run;
         window.addEventListener('aeropredict:settings-updated', () => {
             loadEngineOptions(select, elements.responseBlock, elements.statusBadge, elements.responseTime).then((ok) => {
                 if (ok) run();

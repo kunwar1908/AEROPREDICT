@@ -250,10 +250,14 @@
             <div class="flex items-center gap-3">
               <span class="flex h-2 w-2 rounded-full bg-teal-500 animate-pulse"></span>
               <span class="text-xs font-bold uppercase tracking-widest text-zinc-300">Training Progress — Loss & Val RMSE</span>
+              <span id="training-ds-label" class="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-500"></span>
             </div>
-            <div class="flex gap-4 text-[10px]">
-              <div class="flex items-center gap-1"><div class="w-2 h-2 rounded-full bg-orange-500"></div><span class="text-zinc-400">Train Loss</span></div>
-              <div class="flex items-center gap-1"><div class="w-2 h-2 rounded-full bg-teal-400"></div><span class="text-zinc-400">Val RMSE</span></div>
+            <div class="flex items-center gap-4 text-[10px]">
+              <button type="button" id="training-refresh-btn" class="px-3 py-1.5 rounded-full border border-zinc-700 bg-zinc-900 text-zinc-200 font-bold uppercase tracking-widest hover:border-orange-400 hover:text-orange-300 transition-colors" onclick="refreshTrainingHistory()">Refresh</button>
+              <div class="flex items-center gap-4">
+                <div class="flex items-center gap-1"><div class="w-2 h-2 rounded-full bg-orange-500"></div><span class="text-zinc-400">Train Loss</span></div>
+                <div class="flex items-center gap-1"><div class="w-2 h-2 rounded-full bg-teal-400"></div><span class="text-zinc-400">Val RMSE</span></div>
+              </div>
             </div>
           </div>
           <div class="px-4 pb-4 pt-2 waveform-grid relative overflow-hidden" style="height:230px">
@@ -391,7 +395,7 @@ function getConfiguredApiBase() {
 let mode = 'specific';          // 'specific' | 'random'
 let activeDataset = 'FD001';    // currently selected dataset
 let allPredictions = [];        // current scatter data
-let trainingChart, scatterChart;
+let trainingChart, scatterChart, trainingPlaybackTimer;
 
 const DS_INFO = {
   FD001: { label:'FD001 — 100 engines, 1 op condition, 1 fault mode', engines:100, note:'trained', color:'known-badge' },
@@ -465,6 +469,8 @@ async function setDataset(ds) {
     }
   } catch(e) {}
 
+  await loadTrainingHistory(ds);
+
   // Load all predictions for scatter + metrics
   await loadScatterForDataset(ds);
 }
@@ -484,19 +490,48 @@ async function loadScatterForDataset(ds) {
   } catch(e) { console.error(e); }
 }
 
+function updateTrainingHistoryLabel(ds) {
+  const label = document.getElementById('training-ds-label');
+  if (label) {
+    label.textContent = `${ds} dataset history`;
+  }
+}
+
+async function loadTrainingHistory(ds = activeDataset) {
+  updateTrainingHistoryLabel(ds);
+  try {
+    const r = await fetch(`${API}/api/history?dataset=${ds}`);
+    const history = await r.json();
+    if (Array.isArray(history)) {
+      drawTrainingChart(history);
+    }
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+function refreshTrainingHistory() {
+  loadTrainingHistory(activeDataset);
+}
+
 // ── Charts ────────────────────────────────────────────────────────────
 function drawTrainingChart(history) {
   const ctx = document.getElementById('training-chart').getContext('2d');
   if (trainingChart) trainingChart.destroy();
   if (!history || !history.length) return;
 
+  const state = {
+    step: Math.min(4, history.length),
+    maxStep: history.length,
+  };
+
   trainingChart = new Chart(ctx, {
     type:'line',
     data:{
-      labels: history.map(h => h.epoch),
+      labels: history.slice(0, state.step).map(h => h.epoch),
       datasets:[
-        { label:'Train Loss', data:history.map(h=>h.loss), borderColor:'#F97316', backgroundColor:'rgba(249,115,22,.07)', pointRadius:0, borderWidth:2.5, fill:true, tension:.4, yAxisID:'y' },
-        { label:'Val RMSE',   data:history.map(h=>h.val_rmse), borderColor:'#2DD4BF', backgroundColor:'rgba(45,212,191,.06)', pointRadius:0, borderWidth:2.5, fill:true, tension:.4, yAxisID:'y1' }
+        { label:'Train Loss', data:history.slice(0, state.step).map(h=>h.loss), borderColor:'#F97316', backgroundColor:'rgba(249,115,22,.07)', pointRadius:0, borderWidth:2.5, fill:true, tension:.4, yAxisID:'y' },
+        { label:'Val RMSE',   data:history.slice(0, state.step).map(h=>h.val_rmse), borderColor:'#2DD4BF', backgroundColor:'rgba(45,212,191,.06)', pointRadius:0, borderWidth:2.5, fill:true, tension:.4, yAxisID:'y1' }
       ]
     },
     options:{
@@ -510,6 +545,29 @@ function drawTrainingChart(history) {
       }
     }
   });
+
+  if (trainingPlaybackTimer) {
+    clearInterval(trainingPlaybackTimer);
+  }
+
+  trainingPlaybackTimer = setInterval(() => {
+    if (!trainingChart) {
+      clearInterval(trainingPlaybackTimer);
+      trainingPlaybackTimer = null;
+      return;
+    }
+
+    state.step = Math.min(state.step + 1, state.maxStep);
+    trainingChart.data.labels = history.slice(0, state.step).map(h => h.epoch);
+    trainingChart.data.datasets[0].data = history.slice(0, state.step).map(h => h.loss);
+    trainingChart.data.datasets[1].data = history.slice(0, state.step).map(h => h.val_rmse);
+    trainingChart.update('none');
+
+    if (state.step >= state.maxStep) {
+      clearInterval(trainingPlaybackTimer);
+      trainingPlaybackTimer = null;
+    }
+  }, 350);
 }
 
 function drawScatterChart(predictions, highlightId) {
@@ -626,20 +684,16 @@ function updateDiagnostics(d) {
 // ── Init ──────────────────────────────────────────────────────────────
 async function init() {
   try {
-    const [sumRes, histRes] = await Promise.all([
-      fetch(`${API}/api/summary`),
-      fetch(`${API}/api/history`)
+    const [sumRes] = await Promise.all([
+      fetch(`${API}/api/summary`)
     ]);
     const summary = await sumRes.json();
-    const history = await histRes.json();
 
     document.getElementById('best-epoch').textContent  = summary.metrics.bestEpoch;
     document.getElementById('footer-seq').textContent  = `${summary.config.seqLength} steps`;
     document.getElementById('footer-device').textContent = summary.device;
     document.getElementById('server-status').textContent = `Active on ${summary.device.toUpperCase()}`;
     document.getElementById('server-dot').className = 'w-2 h-2 rounded-full bg-teal-400 animate-pulse';
-
-    drawTrainingChart(history);
 
     // Bootstrap with FD001
     await setDataset('FD001');

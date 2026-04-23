@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -391,7 +393,9 @@ def summary() -> Any:
 
 @app.get("/api/history")
 def history() -> Any:
-    return jsonify(service.get_history())
+    dataset = request.args.get("dataset", service.dataset).upper()
+    history = service.get_history()
+    return jsonify(history)
 
 
 @app.get("/api/sample-prediction")
@@ -565,6 +569,7 @@ def notifications() -> Any:
                     "title": title,
                     "message": message,
                     "dataset": dataset,
+                    "createdAt": datetime.now(timezone.utc).isoformat(),
                 }
             )
 
@@ -577,7 +582,7 @@ def notifications() -> Any:
                     "dataset": dataset,
                     "unreadCount": 0,
                     "notifications": [],
-                    "checkedAt": np.datetime64("now").astype(str),
+                    "checkedAt": datetime.now(timezone.utc).isoformat(),
                 }
             )
 
@@ -586,7 +591,7 @@ def notifications() -> Any:
                 "dataset": dataset,
                 "unreadCount": len(alerts),
                 "notifications": alerts,
-                "checkedAt": np.datetime64("now").astype(str),
+                "checkedAt": datetime.now(timezone.utc).isoformat(),
             }
         )
     except Exception as exc:
@@ -675,4 +680,12 @@ def static_pages(filename: str) -> Any:
 
 
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=8000, debug=True)
+    # Flask's reloader spawns a child process and exits the parent process,
+    # which surfaces as SystemExit inside VS Code debug sessions.
+    running_under_debugger = sys.gettrace() is not None
+    app.run(
+        host="127.0.0.1",
+        port=8000,
+        debug=True,
+        use_reloader=not running_under_debugger,
+    )

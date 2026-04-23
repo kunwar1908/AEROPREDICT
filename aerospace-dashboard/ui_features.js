@@ -1,6 +1,7 @@
 (() => {
   const DEFAULT_API_BASE = "http://127.0.0.1:8000";
   const SETTINGS_KEY = "aeropredict-ui-settings";
+  const NOTIFICATION_DISMISS_KEY = "aeropredict-notifications-dismissed-at";
   const DEFAULT_SETTINGS = {
     apiBase: DEFAULT_API_BASE,
     autoRefreshSeconds: 45,
@@ -466,6 +467,21 @@
     ensureNotificationBadges();
   }
 
+  function getDismissedNotificationsAt() {
+    const raw = localStorage.getItem(NOTIFICATION_DISMISS_KEY);
+    const parsed = raw ? Date.parse(raw) : NaN;
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  function dismissNotifications() {
+    localStorage.setItem(NOTIFICATION_DISMISS_KEY, new Date().toISOString());
+    latestNotifications = [];
+    setUnreadNotifications(0);
+    renderNotificationsInPanel([]);
+    closeNotificationsPanel();
+    showToast("Notifications dismissed.", "info", true);
+  }
+
   function getNotificationEndpoint() {
     return `${getApiBase()}/api/notifications`;
   }
@@ -512,8 +528,13 @@
         throw new Error(`notifications request failed (${response.status})`);
       }
       const payload = await response.json();
-      latestNotifications = Array.isArray(payload.notifications) ? payload.notifications : [];
-      setUnreadNotifications(payload.unreadCount ?? latestNotifications.length ?? 0);
+      const dismissedAt = getDismissedNotificationsAt();
+      latestNotifications = (Array.isArray(payload.notifications) ? payload.notifications : []).filter((item) => {
+        if (!item || !item.createdAt) return true;
+        const createdAt = Date.parse(item.createdAt);
+        return !Number.isFinite(createdAt) || createdAt > dismissedAt;
+      });
+      setUnreadNotifications(latestNotifications.length);
       renderNotificationsInPanel(latestNotifications);
       if (showFeedback) showToast("Notifications refreshed.", "success");
     } catch {
@@ -552,7 +573,10 @@
     panel.innerHTML = `
       <header>
         <h3>Notifications</h3>
-        <button type="button" class="notify-close" id="aeropredict-notify-close">Close</button>
+        <div style="display:flex;gap:0.45rem;align-items:center;">
+          <button type="button" class="notify-close" id="aeropredict-notify-dismiss">Dismiss</button>
+          <button type="button" class="notify-close" id="aeropredict-notify-close">Close</button>
+        </div>
       </header>
       <div id="aeropredict-notify-content">
         <div class="aeropredict-notify-card">
@@ -566,6 +590,8 @@
     document.body.appendChild(backdrop);
     document.body.appendChild(panel);
 
+    const dismissBtn = panel.querySelector("#aeropredict-notify-dismiss");
+    if (dismissBtn) dismissBtn.addEventListener("click", dismissNotifications);
     const closeBtn = panel.querySelector("#aeropredict-notify-close");
     if (closeBtn) closeBtn.addEventListener("click", closeNotificationsPanel);
     backdrop.addEventListener("click", closeNotificationsPanel);
