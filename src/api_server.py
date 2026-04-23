@@ -22,6 +22,7 @@ from data_loader import (
     prepare_train_data,
 )
 from model import LSTMRULPredictor, predict_with_uncertainty
+from captum.attr import IntegratedGradients
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 MODELS_DIR = BASE_DIR / "models"
@@ -71,9 +72,13 @@ class ModelApiService:
         self.checkpoint = load_checkpoint(self.checkpoint_path)
         self.config = self.checkpoint["config"]
         self.metrics = self.checkpoint.get("metrics", {})
-        self.dataset = str(self.config.get("dataset", DEFAULT_DATASET)).upper()
-        self.train_datasets = self.config.get("train_datasets", [self.dataset])
-        self.test_datasets = self.config.get("test_datasets", [self.dataset])
+        train_datasets = self.config.get("train_datasets", [DEFAULT_DATASET])
+        self.train_datasets = [d.upper() for d in train_datasets]
+        if len(self.train_datasets) == 1:
+            self.dataset = self.train_datasets[0]
+        else:
+            self.dataset = "MULTI"
+        self.test_datasets = [d.upper() for d in self.config.get("test_datasets", self.train_datasets)]
         self.mode = self.config.get("mode", "in-distribution")
         self.seq_length = int(self.config.get("seq_length", 50))
         self.max_rul = int(self.config.get("max_rul", 125))
@@ -85,6 +90,7 @@ class ModelApiService:
 
         self._summary_cache: dict[str, Any] | None = None
         self._test_cache = self._build_test_cache()
+        self._per_dataset_cache: dict[str, dict] = {}
         self._ensure_artifacts()
 
     def _load_history(self) -> list[dict[str, Any]]:
@@ -118,11 +124,23 @@ class ModelApiService:
         with torch.no_grad():
             predictions = self.model(X_tensor).cpu().numpy().flatten()
 
+        rul_indexed = rul_df.reset_index(names="unit_id").assign(unit_id=lambda df: df["unit_id"] + 1)
+        rul_indexed = rul_indexed.rename(columns={"RUL": "RUL_final"})
+        prepared_test_df = test_df.copy()
+        last_cycle = test_df.groupby("unit_id")["cycle"].max().rename("max_cycle")
+        prepared_test_df = prepared_test_df.merge(last_cycle.reset_index(), on="unit_id")
+        prepared_test_df["RUL"] = prepared_test_df["max_cycle"] - prepared_test_df["cycle"]
+        prepared_test_df = prepared_test_df.merge(rul_indexed, on="unit_id")
+        prepared_test_df["RUL"] = (prepared_test_df["max_cycle"] - prepared_test_df["cycle"]) + prepared_test_df["RUL_final"]
+        if self.max_rul:
+            prepared_test_df["RUL"] = prepared_test_df["RUL"].clip(upper=self.max_rul)
+
         return {
             "train_df": train_df,
             "test_df": test_df,
             "rul_df": rul_df,
             "prepared_train_df": prepared_train_df,
+            "prepared_test_df": prepared_test_df,
             "feature_columns": feature_columns,
             "X_test": X_test,
             "X_test_scaled": X_scaled,
@@ -130,6 +148,7 @@ class ModelApiService:
             "y_test": y_test,
             "unit_ids": unit_ids,
             "predictions": predictions,
+            "scaler": self.scaler,
         }
 
     def _ensure_artifacts(self) -> None:
@@ -190,10 +209,25 @@ class ModelApiService:
         axes[1].set_title("Sample Predictions With Uncertainty")
         axes[1].grid(True, alpha=0.3)
         axes[1].legend()
-
+        
         plt.tight_layout()
         plt.savefig(output_path, dpi=160)
         plt.close(fig)
+
+    def get_feature_importance(self) -> dict[str, float]:
+        X_test_tensor = self._test_cache["X_test_tensor"]
+        samples = X_test_tensor[:50].requires_grad_()
+        ig = IntegratedGradients(self.model)
+        baseline = torch.zeros_like(samples)
+        attributions, _ = ig.attribute(samples, baseline, return_convergence_delta=True)
+        attr_mean = attributions.mean(dim=0).mean(dim=0).detach().cpu().numpy()
+        
+        feature_columns = self.config.get("feature_columns") or []
+        if len(feature_columns) != len(attr_mean):
+            return {"error": "Feature mismatch"}
+            
+        importance = {feat: float(abs(val)) for feat, val in zip(feature_columns, attr_mean)}
+        return importance
 
     def _compute_uncertainty_summary(self) -> dict[str, float]:
         mean_pred, std_pred = predict_with_uncertainty(self.model, self._test_cache["X_test_tensor"], n_samples=20)
@@ -211,8 +245,20 @@ class ModelApiService:
 
         train_df = self._test_cache["train_df"]
         test_df = self._test_cache["test_df"]
-        feature_columns = self._test_cache["feature_columns"]
+        feature_columns = self.config.get("feature_columns") or []
         uncertainty = self._compute_uncertainty_summary()
+
+        test_metrics = self.metrics.get("test_metrics", {})
+        if test_metrics:
+            first_ds = list(test_metrics.keys())[0]
+            primary_rmse = float(test_metrics[first_ds]["rmse"])
+            primary_mae = float(test_metrics[first_ds]["mae"])
+            primary_nasa = float(test_metrics[first_ds]["nasa_score"])
+        else:
+            primary_rmse = float(self.metrics.get("test_rmse", 0.0))
+            primary_mae = float(self.metrics.get("test_mae", 0.0))
+            primary_nasa = float(self.metrics.get("test_nasa_score", 0.0))
+
         summary = {
             "dataset": self.dataset,
             "device": str(self.device),
@@ -228,12 +274,13 @@ class ModelApiService:
             "metrics": {
                 "bestEpoch": int(self.metrics.get("best_epoch", 0)),
                 "bestValRmse": float(self.metrics.get("best_val_rmse", 0.0)),
-                "testRmse": float(self.metrics.get("test_rmse", 0.0)),
-                "testMae": float(self.metrics.get("test_mae", 0.0)),
-                "nasaScore": float(self.metrics.get("test_nasa_score", 0.0)),
+                "testRmse": primary_rmse,
+                "testMae": primary_mae,
+                "nasaScore": primary_nasa,
                 "averageUncertainty": uncertainty["averageStd"],
                 "uncertaintyMin": uncertainty["minStd"],
                 "uncertaintyMax": uncertainty["maxStd"],
+                "perDatasetMetrics": {k: {"rmse": float(v["rmse"]), "mae": float(v["mae"])} for k, v in test_metrics.items()},
             },
             "metadata": {
                 "trainedOn": self.train_datasets,
@@ -314,15 +361,11 @@ _fresh_cache: dict[str, dict] = {}
 def _get_dataset_cache(dataset: str) -> dict:
     """Return (and memoize) predictions for any of the 4 C-MAPSS datasets.
 
-    For the model's own dataset (FD001) we use the original scaler.
-    For fresh datasets we fit a NEW StandardScaler on that dataset's training
-    data so the LSTM sees values in the same [-3,+3] range it learned on,
-    avoiding the catastrophic scaling mismatch (FD002 setting_1 would scale
-    to ~10,000 with the FD001 scaler).
+    For datasets the model was trained on (in service.train_datasets), uses
+    service.scaler (fitted on all training data combined). For unseen datasets,
+    fits a fresh scaler on that dataset's training data.
     """
     dataset = dataset.upper()
-    if dataset == service.dataset:
-        return service._test_cache
 
     if dataset in _fresh_cache:
         return _fresh_cache[dataset]
@@ -332,44 +375,53 @@ def _get_dataset_cache(dataset: str) -> dict:
     train_df, test_df, rul_df = load_data(dataset)
     _, feature_columns, _ = prepare_train_data(train_df, max_rul=service.max_rul)
 
-    trained_features = service._test_cache["feature_columns"]
+    trained_features = service.config.get("feature_columns", [])
     available = [f for f in trained_features if f in feature_columns]
     missing   = [f for f in trained_features if f not in feature_columns]
 
-    # Build test sequences using the features the model knows about
     X_test, y_test, unit_ids = prepare_test_samples(
         test_df, rul_df, available, seq_length=service.seq_length, max_rul=service.max_rul
     )
 
-    # Pad missing feature columns with zeros to match model input_size
     if missing:
-        zeros  = np.zeros((X_test.shape[0], X_test.shape[1], len(missing)), dtype=np.float32)
+        zeros = np.zeros((X_test.shape[0], X_test.shape[1], len(missing)), dtype=np.float32)
         X_test = np.concatenate([X_test, zeros], axis=-1)
 
-    # ── KEY FIX: fit a fresh scaler on THIS dataset's training split ─────
-    # This prevents the FD001 scaler from turning FD002 setting_1 (mean 24)
-    # into a value of ~10,900 (because FD001 setting_1 std is 0.002).
-    from data_loader import create_sequences_per_engine
-    prepared, _, target = prepare_train_data(train_df, max_rul=service.max_rul)
-    # Build training sequences with the *available* features (same column order)
-    X_train_fresh, _ = create_sequences_per_engine(
-        prepared, available, target, seq_length=service.seq_length
-    )
-    if missing:
-        zeros_tr = np.zeros((X_train_fresh.shape[0], X_train_fresh.shape[1], len(missing)), dtype=np.float32)
-        X_train_fresh = np.concatenate([X_train_fresh, zeros_tr], axis=-1)
+    use_original_scaler = dataset in service.train_datasets
+    if use_original_scaler:
+        scaler = service.scaler
+    else:
+        from data_loader import create_sequences_per_engine
+        prepared, _, target = prepare_train_data(train_df, max_rul=service.max_rul)
+        X_train_ds, _ = create_sequences_per_engine(prepared, available, target, seq_length=service.seq_length)
+        if missing:
+            zeros_tr = np.zeros((X_train_ds.shape[0], X_train_ds.shape[1], len(missing)), dtype=np.float32)
+            X_train_ds = np.concatenate([X_train_ds, zeros_tr], axis=-1)
+        scaler = StandardScaler()
+        scaler.fit(X_train_ds.reshape(-1, X_train_ds.shape[-1]))
 
-    fresh_scaler = StandardScaler()
-    fresh_scaler.fit(X_train_fresh.reshape(-1, X_train_fresh.shape[-1]))
-    X_scaled = fresh_scaler.transform(X_test.reshape(-1, X_test.shape[-1])).reshape(X_test.shape)
-    # ─────────────────────────────────────────────────────────────────────
+    X_scaled = scaler.transform(X_test.reshape(-1, X_test.shape[-1])).reshape(X_test.shape)
 
     X_tensor = torch.tensor(X_scaled, dtype=torch.float32, device=service.device)
     with torch.no_grad():
         predictions = service.model(X_tensor).cpu().numpy().flatten()
 
+    rul_indexed = rul_df.reset_index(names="unit_id").assign(unit_id=lambda df: df["unit_id"] + 1)
+    rul_indexed = rul_indexed.rename(columns={"RUL": "RUL_final"})
+    prepared_test_df = test_df.copy()
+    last_cycle = test_df.groupby("unit_id")["cycle"].max().rename("max_cycle")
+    prepared_test_df = prepared_test_df.merge(last_cycle.reset_index(), on="unit_id")
+    prepared_test_df["RUL"] = prepared_test_df["max_cycle"] - prepared_test_df["cycle"]
+    prepared_test_df = prepared_test_df.merge(rul_indexed, on="unit_id")
+    prepared_test_df["RUL"] = (prepared_test_df["max_cycle"] - prepared_test_df["cycle"]) + prepared_test_df["RUL_final"]
+    if service.max_rul:
+        prepared_test_df["RUL"] = prepared_test_df["RUL"].clip(upper=service.max_rul)
+
     cache = {
         "dataset": dataset,
+        "train_df": train_df,
+        "test_df": test_df,
+        "rul_df": rul_df,
         "X_test": X_test,
         "X_test_scaled": X_scaled,
         "X_test_tensor": X_tensor,
@@ -378,7 +430,11 @@ def _get_dataset_cache(dataset: str) -> dict:
         "predictions": predictions,
         "feature_columns": available,
         "missing_features": missing,
+        "prepared_test_df": prepared_test_df,
+        "scaler": scaler,
+        "use_original_scaler": use_original_scaler,
     }
+
     _fresh_cache[dataset] = cache
     return cache
 
@@ -529,6 +585,107 @@ def predict() -> Any:
         return jsonify({"error": str(exc)}), 400
 
 
+@app.get("/api/engine-history")
+def engine_history() -> Any:
+    """Returns the full historical telemetry and RUL predictions for a specific engine."""
+    engine_id = request.args.get("engineId", type=int)
+    dataset = request.args.get("dataset", service.dataset).upper()
+
+    if engine_id is None:
+        return jsonify({"error": "Missing engineId parameter"}), 400
+
+    try:
+        cache = _get_dataset_cache(dataset)
+        prepared_test_df = cache.get("prepared_test_df")
+
+        if prepared_test_df is None:
+            return jsonify({"error": f"Prepared test data not available for {dataset}"}), 500
+
+        engine_data = prepared_test_df[prepared_test_df["unit_id"] == engine_id].sort_values("cycle")
+        if engine_data.empty:
+            return jsonify({"error": f"Engine {engine_id} not found in {dataset}"}), 404
+
+        cycles = engine_data["cycle"].tolist()
+        actual_ruls = engine_data["RUL"].tolist()
+
+        feature_cols = cache.get("feature_columns", [])
+        raw_test_df = cache.get("test_df")
+        raw_engine_data = None
+        if raw_test_df is not None and engine_id in raw_test_df["unit_id"].values:
+            raw_engine_data = raw_test_df[raw_test_df["unit_id"] == engine_id].sort_values("cycle")
+
+        sensor_data = {}
+        for col in feature_cols:
+            if raw_engine_data is not None and col in raw_engine_data.columns:
+                sensor_data[col] = raw_engine_data[col].tolist()
+            elif col in engine_data.columns:
+                sensor_data[col] = engine_data[col].tolist()
+            else:
+                sensor_data[col] = [0.0] * len(cycles)
+
+        seq_length = service.seq_length
+        n_cycles = len(cycles)
+        step = 1 if n_cycles < 150 else 5
+        step_indices = [i for i in range(n_cycles) if i % step == 0 or i == n_cycles - 1]
+        n_pred = len(step_indices)
+
+        raw_features = engine_data[feature_cols].to_numpy(dtype=np.float32)
+        n_features = len(feature_cols)
+
+        scaler = cache.get("scaler") or service.scaler
+
+        if scaler is not None:
+            raw_flat = raw_features.reshape(-1, n_features)
+            scaled_flat = scaler.transform(raw_flat).reshape(n_cycles, n_features)
+        else:
+            scaled_flat = raw_features
+
+        scaled_sequences = []
+        for idx in step_indices:
+            i = step_indices.index(idx)
+            if idx + 1 < seq_length:
+                sub_seq = scaled_flat[:idx+1]
+                pad_rows = np.repeat(sub_seq[:1], seq_length - len(sub_seq), axis=0)
+                sub_seq = np.vstack([pad_rows, sub_seq])
+            else:
+                sub_seq = scaled_flat[idx-seq_length+1:idx+1]
+            scaled_sequences.append((i, idx, sub_seq))
+
+        batch_tensor = torch.tensor(
+            np.stack([s[2] for s in scaled_sequences]),
+            dtype=torch.float32,
+            device=service.device
+        )
+        with torch.no_grad():
+            batch_preds = service.model(batch_tensor).cpu().numpy().flatten()
+
+        predicted_ruls = [None] * n_cycles
+        for s, pred in zip(scaled_sequences, batch_preds):
+            predicted_ruls[s[1]] = float(pred)
+
+        last_idx = -1
+        for i in range(n_cycles):
+            if predicted_ruls[i] is not None:
+                if last_idx != -1 and i - last_idx > 1:
+                    start_val = predicted_ruls[last_idx]
+                    end_val = predicted_ruls[i]
+                    for j in range(last_idx + 1, i):
+                        predicted_ruls[j] = start_val + (end_val - start_val) * (j - last_idx) / (i - last_idx)
+                last_idx = i
+
+        return jsonify({
+            "engineId": engine_id,
+            "dataset": dataset,
+            "cycles": cycles,
+            "actualRul": actual_ruls,
+            "predictedRul": predicted_ruls,
+            "sensors": sensor_data
+        })
+
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
 @app.get("/artifacts/<path:filename>")
 def artifacts(filename: str) -> Any:
     return send_from_directory(MODELS_DIR, filename)
@@ -542,6 +699,100 @@ def index() -> Any:
 @app.get("/<path:filename>")
 def static_pages(filename: str) -> Any:
     return send_from_directory(DASHBOARD_DIR, filename)
+
+
+@app.get("/api/explain")
+def api_explain() -> Any:
+    # Use first 50 samples for speed
+    X_test_tensor = service._test_cache["X_test_tensor"]
+    samples = X_test_tensor[:50].requires_grad_()
+    
+    from captum.attr import IntegratedGradients
+    ig = IntegratedGradients(service.model)
+    baseline = torch.zeros_like(samples)
+    attributions, _ = ig.attribute(samples, baseline, return_convergence_delta=True)
+    # Average over batch and sequence dimension
+    attr_mean = attributions.mean(dim=0).mean(dim=0).detach().cpu().numpy()
+    
+    feature_columns = service.config.get("feature_columns") or []
+    if len(feature_columns) != len(attr_mean):
+        return jsonify({"error": "Feature mismatch"}), 500
+        
+    importance = {feat: float(abs(val)) for feat, val in zip(feature_columns, attr_mean)}
+    
+    # Sort by importance and format properly
+    sorted_importance = sorted(importance.items(), key=lambda x: x[1], reverse=True)
+    return jsonify({
+        "features": [i[0] for i in sorted_importance],
+        "values": [i[1] for i in sorted_importance]
+    })
+
+
+@app.get("/api/latent-state")
+def api_latent_state() -> Any:
+    """Returns the hidden state activations of the LSTM for a sample sequence."""
+    dataset = request.args.get("dataset", service.dataset).upper()
+    try:
+        cache = _get_dataset_cache(dataset)
+        # Use first sample from test set
+        X_tensor = cache["X_test_tensor"][:1]
+        
+        # We need the LSTM output before the FC layer
+        # Since we can't easily modify the forward without changing model.py,
+        # we'll use a hook or just access the internal layers if possible.
+        # Alternatively, just rerun the lstm part here.
+        model = service.model
+        with torch.no_grad():
+            # Initial states
+            h0 = torch.zeros(model.num_layers, X_tensor.size(0), model.hidden_size).to(X_tensor.device)
+            c0 = torch.zeros(model.num_layers, X_tensor.size(0), model.hidden_size).to(X_tensor.device)
+            
+            # Forward pass through LSTM layer only
+            out, _ = model.lstm(X_tensor, (h0, c0))
+            # out shape: [batch, seq_len, hidden_size] -> [1, 50, 64]
+            activations = out[0].cpu().numpy().tolist()
+            
+        return jsonify({
+            "activations": activations, # 50 x 64
+            "seq_length": service.seq_length,
+            "hidden_size": model.hidden_size
+        })
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.get("/api/accuracy-stats")
+def api_accuracy_stats() -> Any:
+    """Returns RMSE/MAE grouped by RUL buckets to show how accuracy changes near failure."""
+    dataset = request.args.get("dataset", service.dataset).upper()
+    try:
+        cache = _get_dataset_cache(dataset)
+        y_true = cache["y_test"]
+        y_pred = cache["predictions"]
+        
+        buckets = [
+            (0, 25, "0-25 (Critical)"),
+            (25, 50, "25-50 (Late)"),
+            (50, 80, "50-80 (Mid)"),
+            (80, 125, "80+ (Early)")
+        ]
+        
+        stats = []
+        for low, high, label in buckets:
+            mask = (y_true >= low) & (y_true < high)
+            if np.any(mask):
+                true_b = y_true[mask]
+                pred_b = y_pred[mask]
+                rmse = float(np.sqrt(np.mean((true_b - pred_b)**2)))
+                mae = float(np.mean(np.abs(true_b - pred_b)))
+                count = int(np.sum(mask))
+            else:
+                rmse, mae, count = 0.0, 0.0, 0
+            stats.append({"label": label, "rmse": rmse, "mae": mae, "count": count})
+            
+        return jsonify(stats)
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
 
 
 if __name__ == "__main__":

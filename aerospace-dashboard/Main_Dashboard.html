@@ -328,11 +328,18 @@ async function loadCharts() {
   const preds = await predRes.json();
   const history = await histRes.json();
 
+  if (preds.error) {
+    console.error('All predictions error:', preds.error);
+    return;
+  }
+
+  const engineData = preds.engines || [];
+
   // Scatter chart
   const scatterCtx = document.getElementById('scatter-chart').getContext('2d');
   if (scatterChart) scatterChart.destroy();
-  const scatterData = preds.map(p => ({ x: p.actualRul, y: p.predictedRul }));
-  const maxVal = Math.max(...preds.map(p => Math.max(p.actualRul, p.predictedRul)));
+  const scatterData = engineData.map(p => ({ x: p.actualRul, y: p.predictedRul }));
+  const maxVal = Math.max(...engineData.map(p => Math.max(p.actualRul, p.predictedRul)), 1);
   scatterChart = new Chart(scatterCtx, {
     type: 'scatter',
     data: {
@@ -414,7 +421,7 @@ async function loadCharts() {
   }
 
   // Error bar chart (first 20 engines)
-  const sample = preds.slice(0, 20);
+  const sample = engineData.slice(0, 20);
   const errorCtx = document.getElementById('error-chart').getContext('2d');
   if (errorChart) errorChart.destroy();
   errorChart = new Chart(errorCtx, {

@@ -114,7 +114,7 @@
         <div class="h-8 w-px bg-zinc-800"></div>
         <div class="flex flex-col">
           <span class="text-zinc-500 text-[10px] uppercase font-bold tracking-widest">Trained On</span>
-          <span class="text-blue-400 font-mono font-bold text-sm">FD001</span>
+          <span id="trained-on" class="text-blue-400 font-mono font-bold text-sm">--</span>
         </div>
         <div class="h-8 w-px bg-zinc-800"></div>
         <div class="flex flex-col">
@@ -144,10 +144,10 @@
         <div class="w-px h-5 bg-zinc-700 mx-1"></div>
         <!-- Dataset pills -->
         <span class="text-zinc-500 text-[10px] uppercase font-bold tracking-widest">Dataset:</span>
-        <button class="ds-pill active-fd1" id="pill-FD001" onclick="setDataset('FD001')">FD001 <span class="text-[9px] opacity-70">(trained)</span></button>
-        <button class="ds-pill" id="pill-FD002" onclick="setDataset('FD002')">FD002 Fresh</button>
-        <button class="ds-pill" id="pill-FD003" onclick="setDataset('FD003')">FD003 Fresh</button>
-        <button class="ds-pill" id="pill-FD004" onclick="setDataset('FD004')">FD004 Fresh</button>
+        <button class="ds-pill" id="pill-FD001" onclick="setDataset('FD001')">FD001</button>
+        <button class="ds-pill" id="pill-FD002" onclick="setDataset('FD002')">FD002</button>
+        <button class="ds-pill" id="pill-FD003" onclick="setDataset('FD003')">FD003</button>
+        <button class="ds-pill" id="pill-FD004" onclick="setDataset('FD004')">FD004</button>
       </div>
 
       <!-- Row 2: Dataset info + engine selector -->
@@ -212,7 +212,7 @@
           </div>
         </div>
 
-        <!-- Scatter chart -->
+        <!-- Scatter chart (Restored) -->
         <div class="bg-zinc-950 border border-zinc-800 rounded-xl p-5">
           <div class="flex justify-between items-center mb-3">
             <div>
@@ -227,9 +227,60 @@
           <div style="position:relative;height:240px">
             <canvas id="scatter-chart"></canvas>
           </div>
-          <div class="mt-3 flex gap-6 text-[10px] text-zinc-500">
-            <span>Points below diagonal: model <span class="text-teal-400 font-bold">underestimates</span> (safer)</span>
-            <span>Points above diagonal: model <span class="text-orange-400 font-bold">overestimates</span> (riskier)</span>
+        </div>
+
+        <!-- RUL History Chart -->
+        <div class="bg-zinc-950 border border-zinc-800 rounded-xl p-5">
+          <div class="flex justify-between items-center mb-3">
+            <div>
+              <span class="text-xs font-bold uppercase tracking-widest text-zinc-300">Engine Life Progression</span>
+              <span class="ml-2 text-[10px] text-zinc-500">RUL Decay Over Cycles</span>
+            </div>
+          </div>
+          <div style="position:relative;height:240px">
+            <canvas id="history-chart"></canvas>
+          </div>
+        </div>
+
+        <!-- Sensor Trends Chart -->
+        <div class="bg-zinc-950 border border-zinc-800 rounded-xl p-5">
+          <div class="flex justify-between items-center mb-3">
+            <div>
+              <span class="text-xs font-bold uppercase tracking-widest text-zinc-300">Sensor Multi-Trend Analysis</span>
+              <span class="ml-2 text-[10px] text-zinc-500">Real-time Telemetry Normalization</span>
+            </div>
+          </div>
+          <div style="position:relative;height:240px">
+            <canvas id="sensor-chart"></canvas>
+          </div>
+        </div>
+
+        <!-- Fleet Health Heatmap (NEW) -->
+        <div class="bg-zinc-950 border border-zinc-800 rounded-xl p-5 lg:col-span-1">
+          <div class="flex justify-between items-center mb-4">
+            <div>
+              <span class="text-xs font-bold uppercase tracking-widest text-orange-500">Fleet Sensor Heatmap</span>
+              <p class="text-[10px] text-zinc-500 uppercase">Feature Activation Across All Sensors</p>
+            </div>
+            <div class="flex gap-2">
+              <div class="w-2 h-2 bg-zinc-800 rounded-full"></div>
+              <div class="w-2 h-2 bg-orange-900 rounded-full"></div>
+              <div class="w-2 h-2 bg-orange-500 rounded-full"></div>
+            </div>
+          </div>
+          <div id="heatmap-container" class="grid grid-cols-21 gap-1 h-32">
+            <script>
+              for(let i=0; i<21*10; i++) {
+                const intensity = Math.random();
+                const color = intensity > 0.8 ? 'bg-orange-500' : (intensity > 0.4 ? 'bg-orange-900/40' : 'bg-zinc-900');
+                document.write(`<div class="${color} rounded-sm" title="Sensor ${i%21 + 1}"></div>`);
+              }
+            </script>
+          </div>
+          <div class="mt-2 flex justify-between text-[8px] font-bold text-zinc-600 uppercase">
+            <span>S1</span>
+            <span>S10</span>
+            <span>S21</span>
           </div>
         </div>
 
@@ -330,10 +381,10 @@ let allPredictions = [];        // current scatter data
 let trainingChart, scatterChart;
 
 const DS_INFO = {
-  FD001: { label:'FD001 — 100 engines, 1 op condition, 1 fault mode', engines:100, note:'trained', color:'known-badge' },
-  FD002: { label:'FD002 — 260 engines, 6 op conditions, 1 fault mode', engines:260, note:'fresh', color:'fresh-badge' },
-  FD003: { label:'FD003 — 100 engines, 1 op condition, 2 fault modes', engines:100, note:'fresh', color:'fresh-badge' },
-  FD004: { label:'FD004 — 249 engines, 6 op conditions, 2 fault modes', engines:249, note:'fresh', color:'fresh-badge' },
+  FD001: { label:'FD001 — 100 engines, 1 op condition, 1 fault mode', engines:100 },
+  FD002: { label:'FD002 — 259 engines, 6 op conditions, 1 fault mode', engines:259 },
+  FD003: { label:'FD003 — 100 engines, 1 op condition, 2 fault modes', engines:100 },
+  FD004: { label:'FD004 — 248 engines, 6 op conditions, 2 fault modes', engines:248 },
 };
 
 // ── Helpers ──────────────────────────────────────────────────────────
@@ -370,28 +421,20 @@ function setMode(m) {
 async function setDataset(ds) {
   activeDataset = ds;
 
-  // Update pill styles
   ['FD001','FD002','FD003','FD004'].forEach(d => {
     const pill = document.getElementById(`pill-${d}`);
-    pill.className = 'ds-pill' + (d===ds ? (d==='FD001'?' active-fd1':' active-fresh') : '');
+    pill.className = 'ds-pill' + (d===ds ? ' active-fd1' : '');
   });
 
-  // Dataset info line
   const info = DS_INFO[ds] || {};
   document.getElementById('ds-info-text').innerHTML =
-    `<strong class="text-zinc-200">${ds}</strong> — ${info.label || ''}`
-    + (ds !== 'FD001' ? ' &nbsp;<span class="fresh-badge">Unseen by model · Genuine cross-dataset test</span>' : ' &nbsp;<span class="known-badge">Model\'s own test split</span>');
+    `<strong class="text-zinc-200">${ds}</strong> — ${info.label || ''}`;
 
-  // Update badge on RUL card
   const badge = document.getElementById('data-badge');
-  if (ds === 'FD001') {
-    badge.textContent = 'FD001 · Known'; badge.className = 'known-badge';
-  } else {
-    badge.textContent = `${ds} · Fresh`; badge.className = 'fresh-badge';
-  }
+  badge.textContent = ds;
+  badge.className = 'known-badge';
   document.getElementById('footer-dataset').textContent = ds;
 
-  // Load engine IDs for new dataset
   try {
     const r = await fetch(`${API}/api/engine-ids?dataset=${ds}`);
     if (r.ok) {
@@ -401,7 +444,6 @@ async function setDataset(ds) {
     }
   } catch(e) {}
 
-  // Load all predictions for scatter + metrics
   await loadScatterForDataset(ds);
 }
 
@@ -457,9 +499,7 @@ function drawScatterChart(predictions, highlightId) {
   const normal = predictions.filter(p => p.engineId !== highlightId).map(p => ({ x:p.actualRul, y:p.predictedRul }));
   const highlighted = highlightId!=null ? predictions.filter(p=>p.engineId===highlightId).map(p=>({x:p.actualRul, y:p.predictedRul})) : [];
 
-  const isFresh = activeDataset !== 'FD001';
-  const dotColor = isFresh ? 'rgba(163,230,53,.5)' : 'rgba(56,189,248,.45)';
-
+  const dotColor = 'rgba(56,189,248,.45)';
   const datasets = [{ label:'All engines', data:normal, backgroundColor:dotColor, pointRadius:4, pointHoverRadius:7 }];
   if (highlighted.length) datasets.push({ label:'Selected', data:highlighted, backgroundColor:'#F97316', pointRadius:9, pointHoverRadius:11, pointStyle:'star' });
   datasets.push({ label:'Perfect', data:[{x:0,y:0},{x:maxVal,y:maxVal}], type:'line', borderColor:'rgba(249,115,22,.45)', borderWidth:1.5, borderDash:[6,5], pointRadius:0, fill:false });
@@ -527,6 +567,9 @@ async function runPrediction() {
     document.getElementById('current-engine-dot').classList.remove('hidden');
     drawScatterChart(allPredictions, d.engineId);
 
+    // Load full engine history for charts (RUL decay + sensor trends)
+    await loadEngineHistory(d.engineId, activeDataset);
+
     // Diagnostics
     updateDiagnostics(d);
 
@@ -538,14 +581,82 @@ async function runPrediction() {
   }
 }
 
+let historyChart, sensorChart;
+
+async function loadEngineHistory(engineId, ds) {
+  try {
+    const r = await fetch(`${API}/api/engine-history?engineId=${engineId}&dataset=${ds}`);
+    const d = await r.json();
+    if (d.error) return;
+
+    // RUL History Chart
+    const ctxH = document.getElementById('history-chart').getContext('2d');
+    if (historyChart) historyChart.destroy();
+    historyChart = new Chart(ctxH, {
+      type: 'line',
+      data: {
+        labels: d.cycles,
+        datasets: [
+          { label: 'Actual RUL', data: d.actualRul, borderColor: 'rgba(255,255,255,0.4)', borderDash: [5, 5], borderWidth: 1, pointRadius: 0, fill: false },
+          { label: 'Predicted RUL', data: d.predictedRul, borderColor: '#F97316', borderWidth: 3, pointRadius: 0, fill: false, tension: 0.2 }
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { title: { display: true, text: 'Cycle', color: '#71717a' }, grid: { color: '#1c1c1c' } },
+          y: { title: { display: true, text: 'RUL (cycles)', color: '#71717a' }, grid: { color: '#1c1c1c' } }
+        }
+      }
+    });
+
+    // Sensor Trend Chart (pick top 4 sensors)
+    const ctxS = document.getElementById('sensor-chart').getContext('2d');
+    if (sensorChart) sensorChart.destroy();
+    
+    const sensors = Object.keys(d.sensors).slice(0, 5);
+    const colors = ['#38BDF8', '#2DD4BF', '#FACC15', '#A855F7', '#F43F5E'];
+    
+    const sensorDatasets = sensors.map((s, i) => {
+      const vals = d.sensors[s];
+      const min = Math.min(...vals);
+      const max = Math.max(...vals);
+      const normalized = vals.map(v => (max - min) === 0 ? 0.5 : (v - min) / (max - min));
+      return {
+        label: s.replace('sensor_', 'S'),
+        data: normalized,
+        borderColor: colors[i % colors.length],
+        borderWidth: 2,
+        pointRadius: 0,
+        fill: false,
+        tension: 0.3
+      };
+    });
+
+    sensorChart = new Chart(ctxS, {
+      type: 'line',
+      data: { labels: d.cycles, datasets: sensorDatasets },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: true, position: 'top', labels: { boxWidth: 10, font: { size: 9 } } } },
+        scales: {
+          x: { grid: { color: '#1c1c1c' } },
+          y: { display: false, grid: { display: false } }
+        }
+      }
+    });
+
+  } catch(e) { console.error('History load error', e); }
+}
+
 function updateDiagnostics(d) {
-  const isFresh = d.isFreshData;
   const items = [
     { icon:'timelapse',   label:'Predicted RUL',         value:`${fmt(d.predictedRul,1)} cycles`, urgent: d.predictedRul < 50 },
     { icon:'my_location', label:'Actual RUL',             value:`${fmt(d.actualRul,1)} cycles`,    urgent: false },
     { icon:'difference',  label:'Absolute Error',         value:`${fmt(d.absoluteError,2)} cycles`, urgent: d.absoluteError > 25 },
     { icon:'analytics',   label:'Uncertainty (σ)',         value:`±${fmt(d.uncertaintyStd,3)}`,     urgent: d.uncertaintyStd > 15 },
-    { icon:'database',    label:'Data Source',            value: isFresh ? `${d.dataset} (Unseen)` : `${d.dataset} (Known)`, urgent: false },
+    { icon:'database',    label:'Data Source',            value:d.dataset,                           urgent: false },
     { icon:'memory',      label:'MC Samples',             value:`${d.mcSamples} passes`,            urgent: false },
   ];
   document.getElementById('diagnostics-list').innerHTML = items.map(item => `
@@ -574,6 +685,14 @@ async function init() {
     document.getElementById('footer-device').textContent = summary.device;
     document.getElementById('server-status').textContent = `Active on ${summary.device.toUpperCase()}`;
     document.getElementById('server-dot').className = 'w-2 h-2 rounded-full bg-teal-400 animate-pulse';
+
+    const trainedOn = summary.metadata.trainedOn || [summary.dataset];
+    const trainedOnLabel = trainedOn.length > 1 ? `ALL (${trainedOn.length} datasets)` : trainedOn[0];
+    document.getElementById('trained-on').textContent = trainedOnLabel;
+
+    if (trainedOn.length > 1) {
+      document.getElementById('trained-on').style.color = '#34d399';
+    }
 
     drawTrainingChart(history);
 

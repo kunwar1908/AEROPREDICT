@@ -4,7 +4,8 @@ echo "================================"
 echo "System Diagnostics & Testing"
 echo "================================"
 
-PYTHON_BIN="/Users/devariwala/development/no10/.venv/bin/python"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PYTHON_BIN="$SCRIPT_DIR/.venv/bin/python"
 
 echo ""
 echo "1. Checking Python environment..."
@@ -59,13 +60,13 @@ print(f'   ✓ Model parameters: {sum(p.numel() for p in model.parameters()):,}'
 
 echo ""
 echo "6. Testing saved checkpoint files..."
-if [ -f "/Users/devariwala/development/no10/models/lstm_rul.pth" ]; then
+if [ -f "$SCRIPT_DIR/models/lstm_rul.pth" ]; then
     echo "   ✓ Trained model found: lstm_rul.pth"
 else
     echo "   ✗ Trained model NOT found"
 fi
 
-if [ -f "/Users/devariwala/development/no10/models/scaler.pkl" ]; then
+if [ -f "$SCRIPT_DIR/models/scaler.pkl" ]; then
     echo "   ✓ Scaler found: scaler.pkl"
 else
     echo "   ✗ Scaler NOT found"

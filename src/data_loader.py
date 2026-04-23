@@ -56,6 +56,8 @@ def _read_cmapss_table(path: Path, column_names: list[str]) -> pd.DataFrame:
 
 
 def load_data(dataset: str = DEFAULT_DATASET) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    if dataset.upper() == "MULTI":
+        return load_combined_data(["FD001", "FD002", "FD003", "FD004"])
     paths = get_dataset_paths(dataset)
     train_df = _read_cmapss_table(paths["train"], list(CMAPSS_COLUMNS))
     test_df = _read_cmapss_table(paths["test"], list(CMAPSS_COLUMNS))
@@ -63,18 +65,43 @@ def load_data(dataset: str = DEFAULT_DATASET) -> tuple[pd.DataFrame, pd.DataFram
     return train_df, test_df, rul_df
 
 
+def load_combined_data(datasets: list[str]) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    combined_train = []
+    combined_test = []
+    combined_rul = []
+    max_train_unit_id = 0
+    max_test_unit_id = 0
+
+    for ds in datasets:
+        train_df, test_df, rul_df = load_data(ds)
+        
+        train_df = train_df.copy()
+        test_df = test_df.copy()
+        rul_df = rul_df.copy()
+
+        train_df["unit_id"] += max_train_unit_id
+        max_train_unit_id = train_df["unit_id"].max()
+        combined_train.append(train_df)
+
+        test_df["unit_id"] += max_test_unit_id
+        max_test_unit_id = test_df["unit_id"].max()
+        combined_test.append(test_df)
+
+        combined_rul.append(rul_df)
+
+    return (
+        pd.concat(combined_train, ignore_index=True),
+        pd.concat(combined_test, ignore_index=True),
+        pd.concat(combined_rul, ignore_index=True),
+    )
+
+
 def _select_feature_columns(
     train_df: pd.DataFrame,
     near_constant_threshold: float = 1e-8,
 ) -> list[str]:
-    candidate_columns = [name for name in train_df.columns if name not in {"unit_id", "cycle", "RUL"}]
-    feature_columns: list[str] = []
-    for column in candidate_columns:
-        if float(train_df[column].std()) > near_constant_threshold:
-            feature_columns.append(column)
-    if not feature_columns:
-        raise ValueError("No informative feature columns were found in the training data.")
-    return feature_columns
+    # Return all 24 sensory and setting columns equally to ensure cross-dataset dimension matching
+    return [name for name in train_df.columns if name not in {"unit_id", "cycle", "RUL"}]
 
 
 def prepare_train_data(
