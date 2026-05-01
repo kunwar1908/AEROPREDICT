@@ -357,3 +357,5 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+# COMMAND TO RUN TRAINING:
+# python src/train.py --train-datasets FD001 FD002 FD003 FD004 --test-datasets FD001 FD002 FD003 FD004 --mode multi-source --epochs 20 --patience 5

@@ -8,6 +8,7 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@100;300;400;600;700;900&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<script defer src="/ui_features.js"></script>
 <script id="tailwind-config">
   tailwind.config = {
     darkMode:"class",
@@ -73,6 +74,12 @@
     <div class="flex items-center gap-6">
       <span class="text-xl font-bold uppercase tracking-widest text-white">AERO-NAV</span>
       <div class="relative">
+        <select id="dataset-select" class="bg-zinc-900 border border-zinc-700 text-zinc-300 text-xs px-3 py-1.5 rounded-md focus:ring-1 focus:ring-orange-500 outline-none appearance-none pr-8 mr-2">
+          <option value="FD001">FD001</option>
+          <option value="FD002">FD002</option>
+          <option value="FD003">FD003</option>
+          <option value="FD004">FD004</option>
+        </select>
         <select id="engine-select" class="bg-zinc-900 border border-zinc-700 text-zinc-300 text-xs px-3 py-1.5 rounded-md focus:ring-1 focus:ring-orange-500 outline-none appearance-none pr-8">
           <option value="">Loading engines...</option>
         </select>
@@ -84,6 +91,9 @@
         <div class="w-2 h-2 rounded-full bg-teal-500 animate-pulse"></div>
         <span id="status-badge" class="text-orange-500 text-xs tracking-tight">Loading...</span>
       </div>
+      <button onclick="window.AeroPredictUi?.openSettingsModal?.()" class="flex items-center gap-1 px-3 py-1.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 rounded text-xs text-zinc-300 transition-colors">
+        <span class="material-symbols-outlined text-sm">settings</span> Settings
+      </button>
       <button onclick="refreshAll()" class="flex items-center gap-1 px-3 py-1.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 rounded text-xs text-zinc-300 transition-colors">
         <span class="material-symbols-outlined text-sm">refresh</span> Refresh
       </button>
@@ -250,7 +260,15 @@ Chart.defaults.borderColor = '#27272a';
 
 let scatterChart, lossChart, errorChart;
 
-const API = 'http://127.0.0.1:8000';
+const DEFAULT_API_BASE = 'http://127.0.0.1:8000';
+const DATASET_NAMES = ['FD001', 'FD002', 'FD003', 'FD004'];
+
+function getApiBase() {
+  if (window.AeroPredictUi && typeof window.AeroPredictUi.getApiBase === 'function') {
+    return window.AeroPredictUi.getApiBase();
+  }
+  return DEFAULT_API_BASE;
+}
 
 function fmtNum(n, dec=1) { return n != null ? Number(n).toFixed(dec) : '--'; }
 
@@ -262,20 +280,28 @@ function getRiskLevel(rul) {
   return { label: 'LOW', color: 'text-teal-500', icon: 'shield' };
 }
 
-async function loadEngineIds() {
-  const res = await fetch(`${API}/api/engine-ids`);
+function getSelectedDataset() {
+  return document.getElementById('dataset-select')?.value || 'FD001';
+}
+
+async function loadEngineIds(dataset) {
+  const res = await fetch(`${getApiBase()}/api/engine-ids?dataset=${dataset}`);
   const ids = await res.json();
   const sel = document.getElementById('engine-select');
-  sel.innerHTML = ids.map(id => `<option value="${id}">ENGINE-XP7-${String(id).padStart(3,'0')}</option>`).join('');
-  sel.addEventListener('change', () => loadPrediction(parseInt(sel.value)));
+  sel.innerHTML = ids.map(id => `<option value="${id}">${dataset}-ENG-${String(id).padStart(3,'0')}</option>`).join('');
+  sel.onchange = () => loadPrediction(parseInt(sel.value));
 }
 
 async function loadSummary() {
-  const res = await fetch(`${API}/api/summary`);
+  const dataset = getSelectedDataset();
+  const res = await fetch(`${getApiBase()}/api/summary`);
   const d = await res.json();
+  const perDataset = d.metrics?.perDatasetMetrics?.[dataset] || null;
+  const rmse = perDataset ? perDataset.rmse : d.metrics.testRmse;
+  const mae = perDataset ? perDataset.mae : d.metrics.testMae;
 
-  document.getElementById('kpi-rmse').textContent = fmtNum(d.metrics.testRmse);
-  document.getElementById('kpi-mae').textContent = `MAE: ${fmtNum(d.metrics.testMae)} cycles`;
+  document.getElementById('kpi-rmse').textContent = fmtNum(rmse);
+  document.getElementById('kpi-mae').textContent = `MAE: ${fmtNum(mae)} cycles`;
   document.getElementById('best-epoch').textContent = d.metrics.bestEpoch;
   document.getElementById('trained-on').textContent = (d.metadata?.trainedOn || [d.dataset]).join(' ');
   document.getElementById('validated-on').textContent = (d.metadata?.validatedOn || [d.dataset]).join(' ');
@@ -283,12 +309,13 @@ async function loadSummary() {
   document.getElementById('experiment-mode').textContent = (d.metadata?.experimentMode || 'in-distribution').toUpperCase();
   document.getElementById('feature-count').textContent = `${d.config.featureCount} sensors`;
   document.getElementById('device-name').textContent = d.device;
-  document.getElementById('status-badge').textContent = `System: Active on ${d.device.toUpperCase()}`;
+  document.getElementById('status-badge').textContent = `System: Active on ${d.device.toUpperCase()} · ${dataset}`;
   document.getElementById('last-sync-label').textContent = `LAST SYNC: ${new Date().toLocaleTimeString()}`;
 }
 
 async function loadPrediction(engineId) {
-  const url = engineId ? `${API}/api/sample-prediction?engineId=${engineId}` : `${API}/api/sample-prediction`;
+  const dataset = getSelectedDataset();
+  const url = engineId ? `${getApiBase()}/api/sample-prediction?dataset=${dataset}&engineId=${engineId}` : `${getApiBase()}/api/sample-prediction?dataset=${dataset}`;
   const res = await fetch(url);
   const d = await res.json();
 
@@ -321,9 +348,10 @@ async function loadPrediction(engineId) {
 }
 
 async function loadCharts() {
+  const dataset = getSelectedDataset();
   const [predRes, histRes] = await Promise.all([
-    fetch(`${API}/api/all-predictions`),
-    fetch(`${API}/api/history`)
+    fetch(`${getApiBase()}/api/all-predictions?dataset=${dataset}`),
+    fetch(`${getApiBase()}/api/history?dataset=${dataset}`)
   ]);
   const preds = await predRes.json();
   const history = await histRes.json();
@@ -461,12 +489,26 @@ async function refreshAll() {
 
 window.addEventListener('DOMContentLoaded', async () => {
   try {
-    await loadEngineIds();
+    const datasetSelect = document.getElementById('dataset-select');
+    if (datasetSelect) {
+      datasetSelect.value = 'FD001';
+      datasetSelect.addEventListener('change', async () => {
+        await loadEngineIds(getSelectedDataset());
+        await refreshAll();
+      });
+    }
+
+    await loadEngineIds(getSelectedDataset());
     await refreshAll();
   } catch(e) {
     document.getElementById('status-badge').textContent = 'Server offline';
     console.error(e);
   }
+});
+
+window.addEventListener('aeropredict:settings-updated', async () => {
+  await loadEngineIds(getSelectedDataset());
+  await refreshAll();
 });
 </script>
 </body>

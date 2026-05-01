@@ -8,6 +8,7 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<script defer src="/ui_features.js"></script>
 <script id="tailwind-config">
   tailwind.config = { darkMode:"class", theme:{ extend:{ fontFamily:{ headline:["Inter"], body:["Inter"] } } } }
 </script>
@@ -60,6 +61,9 @@
       <div id="server-dot" class="w-2 h-2 bg-yellow-500 rounded-full animate-pulse"></div>
       <span id="server-status" class="text-xs text-zinc-400 font-medium">Connecting...</span>
     </div>
+    <button type="button" onclick="window.AeroPredictUi?.openSettingsModal?.()" class="px-3 py-1.5 text-xs font-bold uppercase tracking-widest border border-zinc-700 rounded-full text-zinc-300 hover:text-white hover:border-orange-500 transition-colors">
+      Settings
+    </button>
   </div>
 </header>
 
@@ -372,7 +376,14 @@
 Chart.defaults.color = '#71717a';
 Chart.defaults.borderColor = '#27272a';
 
-const API = 'http://127.0.0.1:8000';
+const DEFAULT_API = 'http://127.0.0.1:8000';
+
+function getApiBase() {
+  if (window.AeroPredictUi && typeof window.AeroPredictUi.getApiBase === 'function') {
+    return window.AeroPredictUi.getApiBase();
+  }
+  return DEFAULT_API;
+}
 
 // ── State ────────────────────────────────────────────────────────────
 let mode = 'specific';          // 'specific' | 'random'
@@ -436,7 +447,7 @@ async function setDataset(ds) {
   document.getElementById('footer-dataset').textContent = ds;
 
   try {
-    const r = await fetch(`${API}/api/engine-ids?dataset=${ds}`);
+    const r = await fetch(`${getApiBase()}/api/engine-ids?dataset=${ds}`);
     if (r.ok) {
       const ids = await r.json();
       const sel = document.getElementById('engine-select');
@@ -449,7 +460,7 @@ async function setDataset(ds) {
 
 async function loadScatterForDataset(ds) {
   try {
-    const r = await fetch(`${API}/api/all-predictions?dataset=${ds}`);
+    const r = await fetch(`${getApiBase()}/api/all-predictions?dataset=${ds}`);
     const resp = await r.json();
     if (resp.error) return;
     allPredictions = resp.engines;
@@ -525,7 +536,7 @@ async function runPrediction() {
     const isRandom = mode === 'random';
     const engineId = isRandom ? null : parseInt(sel.value);
 
-    let url = `${API}/api/sample-prediction?dataset=${activeDataset}`;
+    let url = `${getApiBase()}/api/sample-prediction?dataset=${activeDataset}`;
     if (isRandom) url += '&random=true';
     else if (engineId) url += `&engineId=${engineId}`;
 
@@ -585,7 +596,7 @@ let historyChart, sensorChart;
 
 async function loadEngineHistory(engineId, ds) {
   try {
-    const r = await fetch(`${API}/api/engine-history?engineId=${engineId}&dataset=${ds}`);
+    const r = await fetch(`${getApiBase()}/api/engine-history?engineId=${engineId}&dataset=${ds}`);
     const d = await r.json();
     if (d.error) return;
 
@@ -674,8 +685,8 @@ function updateDiagnostics(d) {
 async function init() {
   try {
     const [sumRes, histRes] = await Promise.all([
-      fetch(`${API}/api/summary`),
-      fetch(`${API}/api/history`)
+      fetch(`${getApiBase()}/api/summary`),
+      fetch(`${getApiBase()}/api/history`)
     ]);
     const summary = await sumRes.json();
     const history = await histRes.json();
@@ -709,6 +720,10 @@ async function init() {
 }
 
 window.addEventListener('DOMContentLoaded', init);
+
+window.addEventListener('aeropredict:settings-updated', () => {
+  init();
+});
 </script>
 </body>
 </html>

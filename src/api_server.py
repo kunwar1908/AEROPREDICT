@@ -38,10 +38,13 @@ except ImportError:
     DEFAULT_DATASET = "FD001"
     LSTMRULPredictor = None  # type: ignore
     predict_with_uncertainty = None  # type: ignore
+    load_data = None  # type: ignore
+    prepare_test_samples = None  # type: ignore
+    prepare_train_data = None  # type: ignore
 
 # Optional import for feature importance
 try:
-    from captum.attr import IntegratedGradients
+    from captum.attr import IntegratedGradients  # type: ignore
     HAS_CAPTUM = True
 except ImportError:
     HAS_CAPTUM = False
@@ -53,17 +56,20 @@ DASHBOARD_DIR = BASE_DIR / "aerospace-dashboard"
 
 
 def get_device() -> Any:
-    if not HAS_TORCH:
+    if not HAS_TORCH or torch is None:
         return None
-    if torch.cuda.is_available():
-        return torch.device("cuda")
-    if torch.backends.mps.is_available():
-        return torch.device("mps")
-    return torch.device("cpu")
+    try:
+        if torch.cuda.is_available():
+            return torch.device("cuda")
+        if torch.backends.mps.is_available():
+            return torch.device("mps")
+    except (AttributeError, RuntimeError):
+        pass
+    return torch.device("cpu") if torch else None
 
 
 def load_checkpoint(path: Path) -> dict[str, Any]:
-    if not HAS_TORCH:
+    if not HAS_TORCH or torch is None:
         return {
             "state_dict": None,
             "config": {
@@ -79,7 +85,24 @@ def load_checkpoint(path: Path) -> dict[str, Any]:
             "history": [],
         }
     
-    checkpoint = torch.load(path, map_location="cpu")
+    try:
+        checkpoint = torch.load(path, map_location="cpu")
+    except Exception:
+        return {
+            "state_dict": None,
+            "config": {
+                "dataset": DEFAULT_DATASET,
+                "seq_length": 50,
+                "max_rul": 125,
+                "hidden_size": 64,
+                "num_layers": 2,
+                "dropout": 0.2,
+                "feature_columns": None,
+            },
+            "metrics": {},
+            "history": [],
+        }
+    
     if isinstance(checkpoint, dict) and "state_dict" in checkpoint:
         return checkpoint
     return {
@@ -212,7 +235,7 @@ class ModelApiService:
         return model
 
     def _build_test_cache(self) -> dict[str, Any]:
-        if not self.available or not HAS_MODEL:
+        if not self.available or not HAS_MODEL or not HAS_TORCH or torch is None:
             return {
                 "train_df": None,
                 "test_df": None,
@@ -222,18 +245,48 @@ class ModelApiService:
                 "predictions": None,
             }
         
-        train_df, test_df, rul_df = load_data(self.dataset)
-        prepared_train_df, feature_columns, _ = prepare_train_data(train_df, max_rul=self.max_rul)
-        configured_features = self.config.get("feature_columns")
-        if configured_features:
-            feature_columns = list(configured_features)
-        X_test, y_test, unit_ids = prepare_test_samples(
-            test_df, rul_df, feature_columns, seq_length=self.seq_length, max_rul=self.max_rul
-        )
-        X_scaled = self.scaler.transform(X_test.reshape(-1, X_test.shape[-1])).reshape(X_test.shape)
-        X_tensor = torch.tensor(X_scaled, dtype=torch.float32, device=self.device)
-        with torch.no_grad():
-            predictions = self.model(X_tensor).cpu().numpy().flatten()
+        try:
+            if not HAS_MODEL or load_data is None or prepare_train_data is None or prepare_test_samples is None:
+                return {
+                    "train_df": None,
+                    "test_df": None,
+                    "X_test_tensor": None,
+                    "y_test": None,
+                    "unit_ids": None,
+                    "predictions": None,
+                }
+            
+            train_df, test_df, rul_df = load_data(self.dataset)
+            prepared_train_df, feature_columns, _ = prepare_train_data(train_df, max_rul=self.max_rul)
+            configured_features = self.config.get("feature_columns")
+            if configured_features:
+                feature_columns = list(configured_features)
+            X_test, y_test, unit_ids = prepare_test_samples(
+                test_df, rul_df, feature_columns, seq_length=self.seq_length, max_rul=self.max_rul
+            )
+            if self.scaler is None or self.model is None:
+                return {
+                    "train_df": None,
+                    "test_df": None,
+                    "X_test_tensor": None,
+                    "y_test": None,
+                    "unit_ids": None,
+                    "predictions": None,
+                }
+            X_scaled = self.scaler.transform(X_test.reshape(-1, X_test.shape[-1])).reshape(X_test.shape)
+            X_tensor = torch.tensor(X_scaled, dtype=torch.float32, device=self.device)
+            with torch.no_grad():
+                predictions = self.model(X_tensor).cpu().numpy().flatten()
+        except Exception as e:
+            print(f"Error building test cache: {e}")
+            return {
+                "train_df": None,
+                "test_df": None,
+                "X_test_tensor": None,
+                "y_test": None,
+                "unit_ids": None,
+                "predictions": None,
+            }
 
         rul_indexed = rul_df.reset_index(names="unit_id").assign(unit_id=lambda df: df["unit_id"] + 1)
         rul_indexed = rul_indexed.rename(columns={"RUL": "RUL_final"})
@@ -292,6 +345,10 @@ class ModelApiService:
         output_path = MODELS_DIR / "predictions_analysis.png"
         y_test = self._test_cache["y_test"]
         predictions = self._test_cache["predictions"]
+        
+        if predict_with_uncertainty is None or self._test_cache["X_test_tensor"] is None or self.model is None:
+            return
+            
         _, std_pred = predict_with_uncertainty(self.model, self._test_cache["X_test_tensor"], n_samples=20)
         std_pred = std_pred.flatten()
 
@@ -328,32 +385,44 @@ class ModelApiService:
         plt.close(fig)
 
     def get_feature_importance(self) -> dict[str, Any]:
-        if not HAS_CAPTUM or IntegratedGradients is None:
+        if not HAS_CAPTUM or IntegratedGradients is None or not HAS_TORCH or torch is None:
             return {"error": "Captum not installed"}
         
-        X_test_tensor = self._test_cache["X_test_tensor"]
-        samples = X_test_tensor[:50].requires_grad_()
-        ig = IntegratedGradients(self.model)  # type: ignore
-        baseline = torch.zeros_like(samples)
-        attributions, _ = ig.attribute(samples, baseline, return_convergence_delta=True)
-        attr_mean = attributions.mean(dim=0).mean(dim=0).detach().cpu().numpy()
+        X_test_tensor = self._test_cache.get("X_test_tensor")
+        if X_test_tensor is None or self.model is None:
+            return {"error": "Model or test data not available"}
         
-        feature_columns = self.config.get("feature_columns") or []
-        if len(feature_columns) != len(attr_mean):
-            return {"error": "Feature mismatch"}
+        try:
+            samples = X_test_tensor[:50].requires_grad_()
+            ig = IntegratedGradients(self.model)  # type: ignore
+            baseline = torch.zeros_like(samples)
+            attributions, _ = ig.attribute(samples, baseline, return_convergence_delta=True)
+            attr_mean = attributions.mean(dim=0).mean(dim=0).detach().cpu().numpy()
             
-        importance = {feat: float(abs(val)) for feat, val in zip(feature_columns, attr_mean)}
-        return importance
+            feature_columns = self.config.get("feature_columns") or []
+            if len(feature_columns) != len(attr_mean):
+                return {"error": "Feature mismatch"}
+                
+            importance = {feat: float(abs(val)) for feat, val in zip(feature_columns, attr_mean)}
+            return importance
+        except Exception as e:
+            return {"error": str(e)}
 
     def _compute_uncertainty_summary(self) -> dict[str, float]:
-        mean_pred, std_pred = predict_with_uncertainty(self.model, self._test_cache["X_test_tensor"], n_samples=20)
-        del mean_pred
-        std_pred = std_pred.flatten()
-        return {
-            "averageStd": float(std_pred.mean()),
-            "minStd": float(std_pred.min()),
-            "maxStd": float(std_pred.max()),
-        }
+        if not self.available or predict_with_uncertainty is None or self._test_cache.get("X_test_tensor") is None or self.model is None:
+            return {"averageStd": 0.0, "minStd": 0.0, "maxStd": 0.0}
+        
+        try:
+            mean_pred, std_pred = predict_with_uncertainty(self.model, self._test_cache["X_test_tensor"], n_samples=20)
+            del mean_pred
+            std_pred = std_pred.flatten()
+            return {
+                "averageStd": float(std_pred.mean()),
+                "minStd": float(std_pred.min()),
+                "maxStd": float(std_pred.max()),
+            }
+        except Exception:
+            return {"averageStd": 0.0, "minStd": 0.0, "maxStd": 0.0}
 
     def get_summary(self) -> dict[str, Any]:
         if self._summary_cache is not None:
@@ -425,24 +494,39 @@ class ModelApiService:
     def get_history(self) -> list[dict[str, Any]]:
         return self.history
 
-    def predict_sequence(self, sequence: np.ndarray, mc_samples: int = 20) -> dict[str, Any]:
-        feature_count = len(self._test_cache["feature_columns"])
+    def predict_sequence(
+        self,
+        sequence: np.ndarray,
+        mc_samples: int = 20,
+        scaler: Any | None = None,
+    ) -> dict[str, Any]:
+        effective_scaler = scaler or self.scaler
+        if not self.available or not HAS_TORCH or torch is None or not HAS_MODEL or self.model is None or effective_scaler is None:
+            return {"error": "Model or scaler not available"}
+        
+        feature_count = len(self._test_cache.get("feature_columns", []))
         if sequence.shape != (self.seq_length, feature_count):
             raise ValueError(
                 f"Expected sequence shape {(self.seq_length, feature_count)}, got {tuple(sequence.shape)}"
             )
 
-        scaled = self.scaler.transform(sequence).reshape(1, self.seq_length, feature_count)
-        tensor = torch.tensor(scaled, dtype=torch.float32, device=self.device)
-        with torch.no_grad():
-            prediction = float(self.model(tensor).cpu().numpy().flatten()[0])
-        mean_pred, std_pred = predict_with_uncertainty(self.model, tensor, n_samples=mc_samples)
-        return {
-            "predictedRul": prediction,
-            "meanPrediction": float(mean_pred.flatten()[0]),
-            "uncertaintyStd": float(std_pred.flatten()[0]),
-            "mcSamples": mc_samples,
-        }
+        try:
+            if predict_with_uncertainty is None:
+                return {"error": "predict_with_uncertainty not available"}
+            
+            scaled = effective_scaler.transform(sequence).reshape(1, self.seq_length, feature_count)
+            tensor = torch.tensor(scaled, dtype=torch.float32, device=self.device)
+            with torch.no_grad():
+                prediction = float(self.model(tensor).cpu().numpy().flatten()[0])
+            mean_pred, std_pred = predict_with_uncertainty(self.model, tensor, n_samples=mc_samples)
+            return {
+                "predictedRul": prediction,
+                "meanPrediction": float(mean_pred.flatten()[0]),
+                "uncertaintyStd": float(std_pred.flatten()[0]),
+                "mcSamples": mc_samples,
+            }
+        except Exception as e:
+            return {"error": str(e)}
 
     def get_sample_prediction(self, engine_id: int | None = None) -> dict[str, Any]:
         unit_ids = self._test_cache["unit_ids"]
@@ -486,41 +570,56 @@ def _get_dataset_cache(dataset: str) -> dict:
     if dataset in _fresh_cache:
         return _fresh_cache[dataset]
 
-    from sklearn.preprocessing import StandardScaler
+    if not HAS_MODEL or not HAS_TORCH or torch is None or not service.available:
+        return {"error": "Model not available", "predictions": np.array([])}
 
-    train_df, test_df, rul_df = load_data(dataset)
-    _, feature_columns, _ = prepare_train_data(train_df, max_rul=service.max_rul)
+    try:
+        if load_data is None or prepare_train_data is None or prepare_test_samples is None:
+            return {"error": "Data loading functions not available", "predictions": np.array([])}
+        
+        from sklearn.preprocessing import StandardScaler
 
-    trained_features = service.config.get("feature_columns", [])
-    available = [f for f in trained_features if f in feature_columns]
-    missing   = [f for f in trained_features if f not in feature_columns]
+        train_df, test_df, rul_df = load_data(dataset)
+        _, feature_columns, _ = prepare_train_data(train_df, max_rul=service.max_rul)
 
-    X_test, y_test, unit_ids = prepare_test_samples(
-        test_df, rul_df, available, seq_length=service.seq_length, max_rul=service.max_rul
-    )
+        trained_features = service.config.get("feature_columns", [])
+        available = [f for f in trained_features if f in feature_columns]
+        missing   = [f for f in trained_features if f not in feature_columns]
 
-    if missing:
-        zeros = np.zeros((X_test.shape[0], X_test.shape[1], len(missing)), dtype=np.float32)
-        X_test = np.concatenate([X_test, zeros], axis=-1)
+        X_test, y_test, unit_ids = prepare_test_samples(
+            test_df, rul_df, available, seq_length=service.seq_length, max_rul=service.max_rul
+        )
 
-    use_original_scaler = dataset in service.train_datasets
-    if use_original_scaler:
-        scaler = service.scaler
-    else:
-        from data_loader import create_sequences_per_engine
-        prepared, _, target = prepare_train_data(train_df, max_rul=service.max_rul)
-        X_train_ds, _ = create_sequences_per_engine(prepared, available, target, seq_length=service.seq_length)
         if missing:
-            zeros_tr = np.zeros((X_train_ds.shape[0], X_train_ds.shape[1], len(missing)), dtype=np.float32)
-            X_train_ds = np.concatenate([X_train_ds, zeros_tr], axis=-1)
-        scaler = StandardScaler()
-        scaler.fit(X_train_ds.reshape(-1, X_train_ds.shape[-1]))
+            zeros = np.zeros((X_test.shape[0], X_test.shape[1], len(missing)), dtype=np.float32)
+            X_test = np.concatenate([X_test, zeros], axis=-1)
 
-    X_scaled = scaler.transform(X_test.reshape(-1, X_test.shape[-1])).reshape(X_test.shape)
+        use_original_scaler = dataset in service.train_datasets
+        if use_original_scaler:
+            scaler = service.scaler
+        else:
+            from data_loader import create_sequences_per_engine
+            prepared, _, target = prepare_train_data(train_df, max_rul=service.max_rul)
+            X_train_ds, _ = create_sequences_per_engine(prepared, available, target, seq_length=service.seq_length)
+            if missing:
+                zeros_tr = np.zeros((X_train_ds.shape[0], X_train_ds.shape[1], len(missing)), dtype=np.float32)
+                X_train_ds = np.concatenate([X_train_ds, zeros_tr], axis=-1)
+            scaler = StandardScaler()
+            scaler.fit(X_train_ds.reshape(-1, X_train_ds.shape[-1]))
 
-    X_tensor = torch.tensor(X_scaled, dtype=torch.float32, device=service.device)
-    with torch.no_grad():
-        predictions = service.model(X_tensor).cpu().numpy().flatten()
+        if scaler is None:
+            return {"error": "Scaler not available", "predictions": np.array([])}
+        
+        X_scaled = scaler.transform(X_test.reshape(-1, X_test.shape[-1])).reshape(X_test.shape)
+
+        X_tensor = torch.tensor(X_scaled, dtype=torch.float32, device=service.device)
+        with torch.no_grad():
+            if service.model is None:
+                return {"error": "Model is None", "predictions": np.array([])}
+            predictions = service.model(X_tensor).cpu().numpy().flatten()
+    except Exception as e:
+        print(f"Error in _get_dataset_cache: {e}")
+        return {"error": str(e), "predictions": np.array([])}
 
     rul_indexed = rul_df.reset_index(names="unit_id").assign(unit_id=lambda df: df["unit_id"] + 1)
     rul_indexed = rul_indexed.rename(columns={"RUL": "RUL_final"})
@@ -588,13 +687,13 @@ def sample_prediction() -> Any:
 
         sequence   = cache["X_test"][index]
         actual_rul = float(cache["y_test"][index])
-        result     = service.predict_sequence(sequence, mc_samples=20)
+        result     = service.predict_sequence(sequence, mc_samples=20, scaler=cache.get("scaler"))
         result.update({
             "engineId":      int(unit_ids[index]),
             "actualRul":     actual_rul,
             "absoluteError": abs(result["predictedRul"] - actual_rul),
             "dataset":       dataset,
-            "isFreshData":   dataset != service.dataset,
+            "isFreshData":   dataset not in service.train_datasets,
         })
         return jsonify(result)
     except KeyError as exc:
@@ -643,6 +742,9 @@ def explorer() -> Any:
     limit = request.args.get("limit", default=25, type=int) or 25
 
     try:
+        if not HAS_MODEL or load_data is None:
+            return jsonify({"error": "Data loading not available"}), 503
+        
         cache = _get_dataset_cache(dataset)
         train_df, test_df, _ = load_data(dataset)
         latest_rows = test_df.sort_values(["unit_id", "cycle"]).groupby("unit_id").tail(1)
@@ -823,12 +925,18 @@ def predict() -> Any:
     payload = request.get_json(silent=True) or {}
     sequence = payload.get("sequence")
     mc_samples = int(payload.get("mcSamples", 20))
+    dataset = (payload.get("dataset") or request.args.get("dataset") or service.dataset).upper()
     if sequence is None:
         return jsonify({"error": "Missing sequence payload."}), 400
 
     try:
         sequence_array = np.asarray(sequence, dtype=np.float32)
-        result = service.predict_sequence(sequence_array, mc_samples=mc_samples)
+        scaler = None
+        if dataset:
+            cache = _get_dataset_cache(dataset)
+            scaler = cache.get("scaler")
+        result = service.predict_sequence(sequence_array, mc_samples=mc_samples, scaler=scaler)
+        result["dataset"] = dataset
         return jsonify(result)
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
@@ -842,6 +950,9 @@ def engine_history() -> Any:
 
     if engine_id is None:
         return jsonify({"error": "Missing engineId parameter"}), 400
+
+    if not HAS_TORCH or torch is None or not service.available:
+        return jsonify({"error": "Model not available"}), 503
 
     try:
         cache = _get_dataset_cache(dataset)
@@ -906,6 +1017,8 @@ def engine_history() -> Any:
             device=service.device
         )
         with torch.no_grad():
+            if service.model is None:
+                return jsonify({"error": "Model is None"}), 503
             batch_preds = service.model(batch_tensor).cpu().numpy().flatten()
 
         predicted_ruls: list[float | None] = [None] * n_cycles
@@ -956,40 +1069,56 @@ def static_pages(filename: str) -> Any:
 @app.get("/api/explain")
 def api_explain() -> Any:
     # Use first 50 samples for speed
-    if not HAS_CAPTUM or IntegratedGradients is None:
-        return jsonify({"error": "Captum not installed"}), 400
+    if not HAS_CAPTUM or IntegratedGradients is None or not HAS_TORCH or torch is None or not service.available:
+        return jsonify({"error": "Captum not installed or model unavailable"}), 400
     
-    X_test_tensor = service._test_cache["X_test_tensor"]
-    samples = X_test_tensor[:50].requires_grad_()
+    X_test_tensor = service._test_cache.get("X_test_tensor")
+    if X_test_tensor is None or service.model is None:
+        return jsonify({"error": "Test data or model not available"}), 500
     
-    ig = IntegratedGradients(service.model)  # type: ignore
-    baseline = torch.zeros_like(samples)
-    attributions, _ = ig.attribute(samples, baseline, return_convergence_delta=True)
-    # Average over batch and sequence dimension
-    attr_mean = attributions.mean(dim=0).mean(dim=0).detach().cpu().numpy()
-    
-    feature_columns = service.config.get("feature_columns") or []
-    if len(feature_columns) != len(attr_mean):
-        return jsonify({"error": "Feature mismatch"}), 500
+    try:
+        samples = X_test_tensor[:50].requires_grad_()
         
-    importance = {feat: float(abs(val)) for feat, val in zip(feature_columns, attr_mean)}
-    
-    # Sort by importance and format properly
-    sorted_importance = sorted(importance.items(), key=lambda x: x[1], reverse=True)
-    return jsonify({
-        "features": [i[0] for i in sorted_importance],
-        "values": [i[1] for i in sorted_importance]
-    })
+        ig = IntegratedGradients(service.model)  # type: ignore
+        baseline = torch.zeros_like(samples)
+        attributions, _ = ig.attribute(samples, baseline, return_convergence_delta=True)
+        # Average over batch and sequence dimension
+        attr_mean = attributions.mean(dim=0).mean(dim=0).detach().cpu().numpy()
+        
+        feature_columns = service.config.get("feature_columns") or []
+        if len(feature_columns) != len(attr_mean):
+            return jsonify({"error": "Feature mismatch"}), 500
+            
+        importance = {feat: float(abs(val)) for feat, val in zip(feature_columns, attr_mean)}
+        
+        # Sort by importance and format properly
+        sorted_importance = sorted(importance.items(), key=lambda x: x[1], reverse=True)
+        return jsonify({
+            "features": [i[0] for i in sorted_importance],
+            "values": [i[1] for i in sorted_importance]
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @app.get("/api/latent-state")
 def api_latent_state() -> Any:
     """Returns the hidden state activations of the LSTM for a sample sequence."""
+    if not HAS_TORCH or torch is None or not service.available or service.model is None:
+        return jsonify({"error": "Model not available"}), 503
+    
     dataset = request.args.get("dataset", service.dataset).upper()
     try:
         cache = _get_dataset_cache(dataset)
         # Use first sample from test set
-        X_tensor = cache["X_test_tensor"][:1]
+        X_tensor = cache.get("X_test_tensor")
+        if X_tensor is None:
+            X_tensor = cache["X_test_tensor"][:1] if "X_test_tensor" in cache else None
+        else:
+            X_tensor = X_tensor[:1]
+        
+        if X_tensor is None:
+            return jsonify({"error": "Test tensor not available"}), 500
         
         # We need the LSTM output before the FC layer
         # Since we can't easily modify the forward without changing model.py,
