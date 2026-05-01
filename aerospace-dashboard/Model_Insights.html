@@ -3,23 +3,10 @@
 <html class="dark" lang="en"><head>
 <meta charset="utf-8"/>
 <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
-<script onerror="window.__tailwindCdnFailed=true" src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@100;300;400;500;600;700;800;900&amp;display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
-<link href="/theme.css" rel="stylesheet"/>
-<script defer src="/theme.js"></script>
-<script defer src="/ui_features.js"></script>
-<script>
-      window.tailwind = window.tailwind || {};
-      if (window.__tailwindCdnFailed && !document.querySelector('link[data-tailwind-fallback="true"]')) {
-        const fallbackCss = document.createElement("link");
-        fallbackCss.rel = "stylesheet";
-        fallbackCss.href = "https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css";
-        fallbackCss.setAttribute("data-tailwind-fallback", "true");
-        document.head.appendChild(fallbackCss);
-      }
-</script>
 <script id="tailwind-config">
       tailwind.config = {
         darkMode: "class",
@@ -218,32 +205,22 @@
 </div>
 <!-- Training Metrics - Loss & Accuracy Graphs -->
 <div class="col-span-12 lg:col-span-8 bg-zinc-950 border border-zinc-800 p-6 flex flex-col">
-<div class="flex items-center justify-between mb-8">
-<h3 class="text-xs font-black uppercase tracking-[0.2em] text-orange-500">Training Metrics: Loss Convergence</h3>
-<div class="flex gap-4">
-<div class="flex items-center gap-2">
-<div class="w-2 h-2 bg-orange-500 rounded-full"></div>
-<span class="text-[10px] text-zinc-500 font-bold uppercase">Train Loss</span>
-</div>
-<div class="flex items-center gap-2">
-<div class="w-2 h-2 bg-white rounded-full"></div>
-<div class="absolute bottom-[-24px] left-0 w-full flex justify-between text-[9px] font-bold text-zinc-600 px-1">
-<span>0</span>
-<span>250</span>
-<span>500</span>
-<span>750</span>
-<span>1000 EPOCHS</span>
-</div>
-<div class="absolute left-[-40px] top-0 h-full flex flex-col justify-between text-[9px] font-bold text-zinc-600 py-1 text-right">
-<span>1.0</span>
-<span>0.1</span>
-<span>0.01</span>
-<span>LOG LOSS</span>
-</div>
-</div>
-</div>
-<div class="relative h-64 w-full">
-<canvas id="loss-canvas"></canvas>
+  <div class="flex items-center justify-between mb-8">
+    <h3 class="text-xs font-black uppercase tracking-[0.2em] text-orange-500">Training Metrics: Loss Convergence</h3>
+    <div class="flex gap-4">
+      <div class="flex items-center gap-2">
+        <div class="w-2 h-2 bg-orange-500 rounded-full"></div>
+        <span class="text-[10px] text-zinc-500 font-bold uppercase">Train Loss</span>
+      </div>
+      <div class="flex items-center gap-2">
+        <div class="w-2 h-2 bg-white rounded-full"></div>
+        <span class="text-[10px] text-zinc-500 font-bold uppercase">Val RMSE</span>
+      </div>
+    </div>
+  </div>
+  <div class="flex-1 relative min-h-[300px]">
+    <canvas id="loss-canvas"></canvas>
+  </div>
 </div>
 <!-- LSTM Latent State Degradation -->
 <div class="col-span-12 lg:col-span-7 bg-zinc-950 border border-zinc-800 p-6">
@@ -257,29 +234,16 @@
 <div class="flex items-center gap-1"><div class="w-2 h-2 bg-zinc-600"></div> <span class="text-zinc-400">STABLE</span></div>
 </div>
 </div>
-<div class="grid grid-cols-16 grid-rows-8 gap-1 h-64" id="latent-grid">
-<!-- Repeated blocks for heat map visualization -->
-<!-- Row 1 -->
-<div class="bg-zinc-900 border border-zinc-800"></div><div class="bg-zinc-900 border border-zinc-800"></div><div class="bg-zinc-900 border border-zinc-800"></div><div class="bg-zinc-900 border border-zinc-800"></div>
-<div class="bg-zinc-900 border border-zinc-800"></div><div class="bg-zinc-800 border border-zinc-700"></div><div class="bg-orange-500/20 border border-orange-500/30"></div><div class="bg-orange-500/40 border border-orange-500/50"></div>
-<div class="bg-orange-500 border border-orange-400"></div><div class="bg-orange-600 border border-orange-500"></div><div class="bg-orange-400 border border-orange-300"></div><div class="bg-zinc-900 border border-zinc-800"></div>
-<div class="bg-zinc-900 border border-zinc-800"></div><div class="bg-zinc-900 border border-zinc-800"></div><div class="bg-zinc-900 border border-zinc-800"></div><div class="bg-zinc-900 border border-zinc-800"></div>
-<!-- Generating a dense visual texture via grid items -->
-<div class="bg-zinc-900"></div><div class="bg-zinc-900"></div><div class="bg-zinc-900"></div><div class="bg-zinc-900"></div><div class="bg-zinc-800"></div><div class="bg-zinc-800"></div><div class="bg-zinc-800"></div><div class="bg-orange-500/10"></div><div class="bg-orange-500/30"></div><div class="bg-orange-500/50"></div><div class="bg-orange-500/80"></div><div class="bg-orange-500"></div><div class="bg-zinc-900"></div><div class="bg-zinc-900"></div><div class="bg-zinc-900"></div><div class="bg-zinc-900"></div>
-<!-- Simplified representation for the rest of the grid -->
-<div class="contents" id="latent-grid-dynamic"></div>
+<div id="latent-grid" class="grid grid-cols-16 gap-1 h-64 overflow-hidden">
+  <!-- Dynamic grid items will be injected here -->
+  <div class="col-span-full flex items-center justify-center text-zinc-600 text-xs uppercase tracking-widest h-full">Loading state vector...</div>
 </div>
 </div>
 <!-- RUL Estimation Accuracy Curve -->
 <div class="col-span-12 lg:col-span-5 bg-zinc-950 border border-zinc-800 p-6">
 <h3 class="text-xs font-black uppercase tracking-[0.2em] text-orange-500 mb-6">RUL Estimation Accuracy</h3>
-<div class="relative h-64 w-full flex items-end justify-between px-2 pb-6">
-<div class="absolute inset-0 chart-grid opacity-30"></div>
-<!-- RUL Trend Line -->
-<div class="relative z-10 flex items-end justify-between gap-1 w-full h-full" id="rul-accuracy-bars"></div>
-<div class="absolute top-1/2 left-0 w-full border-t border-dashed border-zinc-600 flex justify-end">
-<span class="text-[8px] text-zinc-500 font-black uppercase -mt-4 mr-2">Target Baseline</span>
-</div>
+<div id="accuracy-chart-container" class="relative h-64 w-full">
+  <canvas id="accuracy-canvas"></canvas>
 </div>
 <div class="mt-4 flex justify-between text-[10px] font-bold text-zinc-500">
 <span>Cycle 1</span>
@@ -301,27 +265,45 @@
 <div class="space-y-4">
 <div class="flex justify-between items-end border-b border-zinc-800 pb-2">
 <span class="text-[10px] font-bold uppercase text-zinc-500">LPC Temp (T2)</span>
-<span class="text-xs font-black text-white" id="sensor-val-1">--</span>
+<span class="text-xs font-black text-white">482.12 K</span>
 </div>
-<div class="h-16 flex items-end gap-1" id="sensor-bars-1">
+<div class="h-16 flex items-end gap-1">
+<script>
+                                    for(let i=0; i<20; i++) {
+                                        let h = Math.floor(Math.random() * 40) + 10;
+                                        document.write(`<div class="flex-1 bg-zinc-800" style="height: ${h}px"></div>`);
+                                    }
+                                </script>
 </div>
 </div>
 <!-- Sensor Row 2 -->
 <div class="space-y-4">
 <div class="flex justify-between items-end border-b border-zinc-800 pb-2">
 <span class="text-[10px] font-bold uppercase text-zinc-500">Fan Speed (N1)</span>
-<span class="text-xs font-black text-white" id="sensor-val-2">--</span>
+<span class="text-xs font-black text-white">2,388 RPM</span>
 </div>
-<div class="h-16 flex items-end gap-1" id="sensor-bars-2">
+<div class="h-16 flex items-end gap-1">
+<script>
+                                    for(let i=0; i<20; i++) {
+                                        let h = Math.floor(Math.random() * 50) + 20;
+                                        document.write(`<div class="flex-1 bg-orange-500/40" style="height: ${h}px"></div>`);
+                                    }
+                                </script>
 </div>
 </div>
 <!-- Sensor Row 3 -->
 <div class="space-y-4">
 <div class="flex justify-between items-end border-b border-zinc-800 pb-2">
 <span class="text-[10px] font-bold uppercase text-zinc-500">Oil Pressure (P15)</span>
-<span class="text-xs font-black text-white" id="sensor-val-3">--</span>
+<span class="text-xs font-black text-white">21.61 PSIA</span>
 </div>
-<div class="h-16 flex items-end gap-1" id="sensor-bars-3">
+<div class="h-16 flex items-end gap-1">
+<script>
+                                    for(let i=0; i<20; i++) {
+                                        let h = Math.floor(Math.random() * 30) + 15;
+                                        document.write(`<div class="flex-1 bg-zinc-800" style="height: ${h}px"></div>`);
+                                    }
+                                </script>
 </div>
 </div>
 </div>
@@ -347,48 +329,16 @@
 </footer>
 </main>
 <script>
-const SETTINGS_KEY = 'aeropredict-ui-settings';
-const DEFAULT_API = 'http://127.0.0.1:8000';
-let API = getConfiguredApiBase();
-
-function getConfiguredApiBase() {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
-    const configured = String(parsed.apiBase || '').trim().replace(/\/$/, '');
-    return configured || DEFAULT_API;
-  } catch {
-    return DEFAULT_API;
-  }
-}
-
-function renderBars(containerId, values, colorClass) {
-  const container = document.getElementById(containerId);
-  if (!container) return;
-  container.innerHTML = values.map((value) => {
-    const height = Math.max(8, Math.min(62, value));
-    return `<div class="flex-1 ${colorClass}" style="height:${height}px"></div>`;
-  }).join('');
-}
-
-function normalizeSeries(values, minHeight = 12, maxHeight = 62) {
-  if (!values.length) return [];
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  if (Math.abs(max - min) < 1e-8) return values.map(() => (minHeight + maxHeight) / 2);
-  return values.map((value) => minHeight + ((value - min) / (max - min)) * (maxHeight - minHeight));
-}
+const API = 'http://127.0.0.1:8000';
 
 async function loadInsights() {
   try {
-    const [sumRes, histRes, predRes] = await Promise.all([
+    const [sumRes, histRes] = await Promise.all([
       fetch(`${API}/api/summary`),
-      fetch(`${API}/api/history`),
-      fetch(`${API}/api/all-predictions`)
+      fetch(`${API}/api/history`)
     ]);
     const summary = await sumRes.json();
     const history = await histRes.json();
-    const predictionsPayload = await predRes.json();
-    const predictions = predictionsPayload.engines || [];
 
     // Update hero stats
     const rmse = summary.metrics.bestValRmse;
@@ -414,61 +364,91 @@ async function loadInsights() {
       });
     }
 
-    // Latent grid from error distribution
-    const latentGrid = document.getElementById('latent-grid-dynamic');
-    if (latentGrid) {
-      const errors = predictions.map((item) => Number(item.error || 0));
-      const levels = normalizeSeries(errors.slice(0, 80), 0, 1);
-      latentGrid.innerHTML = levels.map((level) => {
-        const cls = level > 0.7 ? 'bg-orange-500/70' : level > 0.45 ? 'bg-orange-500/35' : level > 0.2 ? 'bg-zinc-800' : 'bg-zinc-900';
-        return `<div class="${cls} border border-white/5"></div>`;
-      }).join('');
+    // Feature list - Use /api/explain for real importance
+    try {
+      const explainRes = await fetch(`${API}/api/explain`);
+      const explainData = await explainRes.json();
+      const featureContainer = document.getElementById('feature-list');
+      if (featureContainer && !explainData.error) {
+        const features = explainData.features || [];
+        const values = explainData.values || [];
+        const maxVal = Math.max(...values, 0.0001);
+        
+        featureContainer.innerHTML = features.map((f, i) => {
+          const pct = (values[i] / maxVal) * 100;
+          return `<div class="space-y-1">
+            <div class="flex justify-between text-[10px] font-bold uppercase text-zinc-400">
+              <span>${f}</span>
+              <span>${pct.toFixed(1)}%</span>
+            </div>
+            <div class="h-2 bg-zinc-900 w-full">
+              <div class="h-full bg-orange-500" style="width:${Math.max(2, pct)}%"></div>
+            </div>
+          </div>`;
+        }).slice(0, 10).join(''); // Show top 10
+      }
+    } catch(e) {
+      console.warn('Explain endpoint failed, falling back to basic list');
     }
 
-    // RUL bars from actual RUL distribution
-    const rulValues = predictions.slice(0, 24).map((item) => Number(item.actualRul || 0));
-    const normalizedRul = normalizeSeries(rulValues, 12, 210);
-    const rulBars = document.getElementById('rul-accuracy-bars');
-    if (rulBars) {
-      rulBars.innerHTML = normalizedRul.map((height, index) => {
-        const opacity = 0.2 + (index / Math.max(1, normalizedRul.length - 1)) * 0.8;
-        return `<div class="w-2 bg-orange-500" style="height:${height}px;opacity:${opacity.toFixed(2)}"></div>`;
-      }).join('');
-    }
+    // Latent State Grid
+    try {
+      const latentRes = await fetch(`${API}/api/latent-state`);
+      const latentData = await latentRes.json();
+      const grid = document.getElementById('latent-grid');
+      if (grid && !latentData.error) {
+        // Sample activations: only show first 128 elements (16x8) from the 50x64 total
+        // to fit the visual grid style, or show a compressed version.
+        // Let's take the last cycle's hidden state (64 units) and repeat it 2 times
+        // or just show a slice of the 50x64.
+        const acts = latentData.activations; // 50x64
+        const flatActs = acts.flat();
+        const maxAct = Math.max(...flatActs.map(Math.abs), 0.0001);
+        
+        // We want to fill 128 cells (16x8)
+        grid.innerHTML = '';
+        for(let i=0; i<128; i++) {
+          const rawVal = Math.abs(flatActs[i % flatActs.length]);
+          const val = rawVal / maxAct; // Normalize to 0-1
+          const opacity = val > 0.7 ? 'bg-orange-500' : (val > 0.3 ? 'bg-orange-500/50' : (val > 0.1 ? 'bg-orange-500/20' : 'bg-zinc-900'));
+          const div = document.createElement('div');
+          div.className = `${opacity} border border-white/5 rounded-[1px]`;
+          div.title = `Unit Activation: ${rawVal.toFixed(3)}`;
+          grid.appendChild(div);
+        }
+      }
+    } catch(e) { console.error('Latent state error', e); }
 
-    // Sensor trend mini-bars derived from training history
-    const trainLossSeries = normalizeSeries(history.map((item) => Number(item.loss || 0)).slice(-20), 10, 62);
-    const valRmseSeries = normalizeSeries(history.map((item) => Number(item.val_rmse || 0)).slice(-20), 10, 62);
-    const uncertaintySeries = normalizeSeries(history.map((item) => Number(item.val_mae || item.val_rmse || 0)).slice(-20), 10, 62);
+    // Accuracy Stats Chart
+    try {
+      const accRes = await fetch(`${API}/api/accuracy-stats`);
+      const accData = await accRes.json();
+      const accCanvas = document.getElementById('accuracy-canvas');
+      if (accCanvas && accData.length > 0) {
+        new Chart(accCanvas, {
+          type: 'bar',
+          data: {
+            labels: accData.map(d => d.label),
+            datasets: [
+              { label: 'RMSE', data: accData.map(d => d.rmse), backgroundColor: 'rgba(249,115,22,0.8)', borderRadius: 4 },
+              { label: 'MAE',  data: accData.map(d => d.mae),  backgroundColor: 'rgba(255,255,255,0.4)', borderRadius: 4 }
+            ]
+          },
+          options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+              x: { grid: { display: false }, ticks: { color: '#71717a', font: { size: 9 } } },
+              y: { grid: { color: '#1c1c1c' }, ticks: { color: '#71717a', maxTicksLimit: 5 } }
+            }
+          }
+        });
+      }
+    } catch(e) { console.error('Accuracy stats error', e); }
 
-    renderBars('sensor-bars-1', trainLossSeries, 'bg-zinc-700');
-    renderBars('sensor-bars-2', valRmseSeries, 'bg-orange-500/40');
-    renderBars('sensor-bars-3', uncertaintySeries, 'bg-zinc-700');
-
-    const latestPrediction = predictions[0] || {};
-    const sensor1 = document.getElementById('sensor-val-1');
-    const sensor2 = document.getElementById('sensor-val-2');
-    const sensor3 = document.getElementById('sensor-val-3');
-    if (sensor1) sensor1.textContent = `${Number(summary.metrics?.testRmse || 0).toFixed(2)} cycles`;
-    if (sensor2) sensor2.textContent = `${Number(summary.metrics?.testMae || 0).toFixed(2)} cycles`;
-    if (sensor3) sensor3.textContent = `${Number(latestPrediction.error || 0).toFixed(2)} err`;
-
-    // Feature list
-    const features = summary.config.featureColumns || [];
-    const featureContainer = document.getElementById('feature-list');
-    if (featureContainer && features.length > 0) {
-      featureContainer.innerHTML = features.map((f,i) => {
-        const pct = Math.max(10, 100 - i * (90 / features.length));
-        return `<div class="space-y-1"><div class="flex justify-between text-[10px] font-bold uppercase text-zinc-400"><span>${f}</span><span>${pct.toFixed(0)}%</span></div><div class="h-2 bg-zinc-900 w-full"><div class="h-full bg-orange-500" style="width:${pct}%"></div></div></div>`;
-      }).join('');
-    }
   } catch(e) { console.error('Insights load error', e); }
 }
 
 window.addEventListener('DOMContentLoaded', loadInsights);
-window.addEventListener('aeropredict:settings-updated', () => {
-  API = getConfiguredApiBase();
-  loadInsights();
-});
 </script>
 </body></html>

@@ -4,23 +4,10 @@
 <meta charset="utf-8"/>
 <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
 <title>AERO-CORE | Main Dashboard</title>
-<script onerror="window.__tailwindCdnFailed=true" src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@100;300;400;600;700;900&display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
-<link href="/theme.css" rel="stylesheet"/>
-<script defer src="/theme.js"></script>
-<script defer src="/ui_features.js"></script>
-<script>
-  window.tailwind = window.tailwind || {};
-  if (window.__tailwindCdnFailed && !document.querySelector('link[data-tailwind-fallback="true"]')) {
-    const fallbackCss = document.createElement("link");
-    fallbackCss.rel = "stylesheet";
-    fallbackCss.href = "https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css";
-    fallbackCss.setAttribute("data-tailwind-fallback", "true");
-    document.head.appendChild(fallbackCss);
-  }
-</script>
 <script id="tailwind-config">
   tailwind.config = {
     darkMode:"class",
@@ -263,31 +250,9 @@ Chart.defaults.borderColor = '#27272a';
 
 let scatterChart, lossChart, errorChart;
 
-const SETTINGS_KEY = 'aeropredict-ui-settings';
-const DEFAULT_API = 'http://127.0.0.1:8000';
-let API = getConfiguredApiBase();
-
-function getConfiguredApiBase() {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
-    const configured = String(parsed.apiBase || '').trim().replace(/\/$/, '');
-    return configured || DEFAULT_API;
-  } catch {
-    return DEFAULT_API;
-  }
-}
+const API = 'http://127.0.0.1:8000';
 
 function fmtNum(n, dec=1) { return n != null ? Number(n).toFixed(dec) : '--'; }
-
-function normalizePredictions(payload) {
-  if (Array.isArray(payload)) {
-    return payload;
-  }
-  if (payload && Array.isArray(payload.engines)) {
-    return payload.engines;
-  }
-  return [];
-}
 
 function getRiskLevel(rul) {
   if (rul == null) return { label: '--', color: 'text-zinc-400', icon: 'help' };
@@ -360,19 +325,21 @@ async function loadCharts() {
     fetch(`${API}/api/all-predictions`),
     fetch(`${API}/api/history`)
   ]);
-  const predsPayload = await predRes.json();
-  const preds = normalizePredictions(predsPayload);
+  const preds = await predRes.json();
   const history = await histRes.json();
 
-  if (!preds.length) {
-    throw new Error('No prediction records were returned by /api/all-predictions.');
+  if (preds.error) {
+    console.error('All predictions error:', preds.error);
+    return;
   }
+
+  const engineData = preds.engines || [];
 
   // Scatter chart
   const scatterCtx = document.getElementById('scatter-chart').getContext('2d');
   if (scatterChart) scatterChart.destroy();
-  const scatterData = preds.map(p => ({ x: p.actualRul, y: p.predictedRul }));
-  const maxVal = Math.max(...preds.map(p => Math.max(p.actualRul, p.predictedRul)));
+  const scatterData = engineData.map(p => ({ x: p.actualRul, y: p.predictedRul }));
+  const maxVal = Math.max(...engineData.map(p => Math.max(p.actualRul, p.predictedRul)), 1);
   scatterChart = new Chart(scatterCtx, {
     type: 'scatter',
     data: {
@@ -454,7 +421,7 @@ async function loadCharts() {
   }
 
   // Error bar chart (first 20 engines)
-  const sample = preds.slice(0, 20);
+  const sample = engineData.slice(0, 20);
   const errorCtx = document.getElementById('error-chart').getContext('2d');
   if (errorChart) errorChart.destroy();
   errorChart = new Chart(errorCtx, {
@@ -487,8 +454,7 @@ async function refreshAll() {
   try {
     await Promise.all([loadSummary(), loadPrediction(), loadCharts()]);
   } catch(err) {
-    const message = err && err.message ? err.message : 'Unexpected dashboard error';
-    document.getElementById('status-badge').textContent = `Error — ${message}`;
+    document.getElementById('status-badge').textContent = 'Error — is the server running?';
     console.error(err);
   }
 }
@@ -499,15 +465,6 @@ window.addEventListener('DOMContentLoaded', async () => {
     await refreshAll();
   } catch(e) {
     document.getElementById('status-badge').textContent = 'Server offline';
-    console.error(e);
-  }
-});
-window.addEventListener('aeropredict:settings-updated', async () => {
-  API = getConfiguredApiBase();
-  try {
-    await loadEngineIds();
-    await refreshAll();
-  } catch (e) {
     console.error(e);
   }
 });

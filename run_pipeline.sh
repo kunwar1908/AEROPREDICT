@@ -1,24 +1,17 @@
-#!/usr/bin/env bash
+#!/bin/bash
 
 # Predictive Maintenance RUL Prediction - Complete Pipeline
 
-set -euo pipefail
+set -e  # Exit on error
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [[ -x "$SCRIPT_DIR/.venv/Scripts/python.exe" ]]; then
-	PYTHON_BIN="$SCRIPT_DIR/.venv/Scripts/python.exe"
-elif [[ -x "$SCRIPT_DIR/.venv/bin/python" ]]; then
-	PYTHON_BIN="$SCRIPT_DIR/.venv/bin/python"
-else
-	PYTHON_BIN="python"
-fi
-
-cd "$SCRIPT_DIR"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PYTHON_BIN="$SCRIPT_DIR/.venv/bin/python"
 
 echo "================================"
 echo "RUL Prediction Pipeline"
 echo "================================"
-echo "Using Python: $PYTHON_BIN"
+
+cd "$SCRIPT_DIR"
 
 echo ""
 echo "1. Downloading official NASA C-MAPSS data..."
@@ -26,7 +19,7 @@ echo "1. Downloading official NASA C-MAPSS data..."
 
 echo ""
 echo "2. Training model on FD001..."
-"$PYTHON_BIN" src/train.py --dataset FD001
+"$PYTHON_BIN" src/train.py --train-datasets FD001 --test-datasets FD001 --mode in-distribution
 
 echo ""
 echo "3. Evaluating saved checkpoint..."
