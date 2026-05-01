@@ -12,25 +12,49 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pickle
-import torch
 from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 
-from data_loader import (
-    DEFAULT_DATASET,
-    load_data,
-    prepare_test_samples,
-    prepare_train_data,
-)
-from model import LSTMRULPredictor, predict_with_uncertainty
-from captum.attr import IntegratedGradients
+# Optional PyTorch import
+try:
+    import torch
+    HAS_TORCH = True
+except ImportError:
+    HAS_TORCH = False
+    torch = None  # type: ignore
+
+# Optional model imports
+try:
+    from data_loader import (
+        DEFAULT_DATASET,
+        load_data,
+        prepare_test_samples,
+        prepare_train_data,
+    )
+    from model import LSTMRULPredictor, predict_with_uncertainty
+    HAS_MODEL = True
+except ImportError:
+    HAS_MODEL = False
+    DEFAULT_DATASET = "FD001"
+    LSTMRULPredictor = None  # type: ignore
+    predict_with_uncertainty = None  # type: ignore
+
+# Optional import for feature importance
+try:
+    from captum.attr import IntegratedGradients
+    HAS_CAPTUM = True
+except ImportError:
+    HAS_CAPTUM = False
+    IntegratedGradients = None  # type: ignore
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 MODELS_DIR = BASE_DIR / "models"
 DASHBOARD_DIR = BASE_DIR / "aerospace-dashboard"
 
 
-def get_device() -> torch.device:
+def get_device() -> Any:
+    if not HAS_TORCH:
+        return None
     if torch.cuda.is_available():
         return torch.device("cuda")
     if torch.backends.mps.is_available():
@@ -39,6 +63,22 @@ def get_device() -> torch.device:
 
 
 def load_checkpoint(path: Path) -> dict[str, Any]:
+    if not HAS_TORCH:
+        return {
+            "state_dict": None,
+            "config": {
+                "dataset": DEFAULT_DATASET,
+                "seq_length": 50,
+                "max_rul": 125,
+                "hidden_size": 64,
+                "num_layers": 2,
+                "dropout": 0.2,
+                "feature_columns": None,
+            },
+            "metrics": {},
+            "history": [],
+        }
+    
     checkpoint = torch.load(path, map_location="cpu")
     if isinstance(checkpoint, dict) and "state_dict" in checkpoint:
         return checkpoint
@@ -64,11 +104,68 @@ class ModelApiService:
         self.scaler_path = MODELS_DIR / "scaler.pkl"
         self.history_path = MODELS_DIR / "training_history.json"
         self.device = get_device()
+        self.available = True
+        
+        # Check if required files exist and torch is available
+        if not HAS_TORCH:
+            print("WARNING: PyTorch not available - running in demo mode")
+            self.available = False
+            self.checkpoint = load_checkpoint(self.checkpoint_path)
+            self.config = self.checkpoint["config"]
+            self.metrics = {}
+            self.history = []
+            self.model = None
+            self.scaler = None
+            self.train_datasets = ["FD001"]
+            self.dataset = "FD001"
+            self.test_datasets = ["FD001"]
+            self.mode = "demo"
+            self.seq_length = 50
+            self.max_rul = 125
+            self._summary_cache = None
+            self._test_cache = {}
+            self._per_dataset_cache = {}
+            return
 
         if not self.checkpoint_path.exists():
-            raise FileNotFoundError(f"Missing checkpoint: {self.checkpoint_path}")
+            print(f"WARNING: Missing checkpoint: {self.checkpoint_path}")
+            self.available = False
+            self.checkpoint = load_checkpoint(self.checkpoint_path)
+            self.config = self.checkpoint["config"]
+            self.metrics = {}
+            self.history = []
+            self.model = None
+            self.scaler = None
+            self.train_datasets = ["FD001"]
+            self.dataset = "FD001"
+            self.test_datasets = ["FD001"]
+            self.mode = "demo"
+            self.seq_length = 50
+            self.max_rul = 125
+            self._summary_cache = None
+            self._test_cache = {}
+            self._per_dataset_cache = {}
+            return
+            
         if not self.scaler_path.exists():
-            raise FileNotFoundError(f"Missing scaler: {self.scaler_path}")
+            print(f"WARNING: Missing scaler: {self.scaler_path}")
+            self.available = False
+            self.checkpoint = load_checkpoint(self.checkpoint_path)
+            self.config = self.checkpoint["config"]
+            self.metrics = {}
+            self.history = []
+            self.model = None
+            self.scaler = None
+            self.train_datasets = ["FD001"]
+            self.dataset = "FD001"
+            self.test_datasets = ["FD001"]
+            self.mode = "demo"
+            self.seq_length = 50
+            self.max_rul = 125
+            self._summary_cache = None
+            self._test_cache = {}
+            self._per_dataset_cache = {}
+            return
 
         self.checkpoint = load_checkpoint(self.checkpoint_path)
         self.config = self.checkpoint["config"]
@@ -99,7 +196,10 @@ class ModelApiService:
             return json.loads(self.history_path.read_text(encoding="utf-8"))
         return list(self.checkpoint.get("history", []))
 
-    def _load_model(self) -> LSTMRULPredictor:
+    def _load_model(self) -> Any:
+        if not HAS_MODEL or not HAS_TORCH or LSTMRULPredictor is None:
+            return None
+        
         feature_columns = self.config.get("feature_columns") or []
         model = LSTMRULPredictor(
             input_size=int(self.config.get("input_size", len(feature_columns))),
@@ -112,6 +212,16 @@ class ModelApiService:
         return model
 
     def _build_test_cache(self) -> dict[str, Any]:
+        if not self.available or not HAS_MODEL:
+            return {
+                "train_df": None,
+                "test_df": None,
+                "X_test_tensor": None,
+                "y_test": None,
+                "unit_ids": None,
+                "predictions": None,
+            }
+        
         train_df, test_df, rul_df = load_data(self.dataset)
         prepared_train_df, feature_columns, _ = prepare_train_data(train_df, max_rul=self.max_rul)
         configured_features = self.config.get("feature_columns")
@@ -153,6 +263,8 @@ class ModelApiService:
         }
 
     def _ensure_artifacts(self) -> None:
+        if not self.available:
+            return
         self._plot_training_history()
         self._plot_predictions_analysis()
 
@@ -215,10 +327,13 @@ class ModelApiService:
         plt.savefig(output_path, dpi=160)
         plt.close(fig)
 
-    def get_feature_importance(self) -> dict[str, float]:
+    def get_feature_importance(self) -> dict[str, Any]:
+        if not HAS_CAPTUM or IntegratedGradients is None:
+            return {"error": "Captum not installed"}
+        
         X_test_tensor = self._test_cache["X_test_tensor"]
         samples = X_test_tensor[:50].requires_grad_()
-        ig = IntegratedGradients(self.model)
+        ig = IntegratedGradients(self.model)  # type: ignore
         baseline = torch.zeros_like(samples)
         attributions, _ = ig.attribute(samples, baseline, return_convergence_delta=True)
         attr_mean = attributions.mean(dim=0).mean(dim=0).detach().cpu().numpy()
@@ -793,9 +908,11 @@ def engine_history() -> Any:
         with torch.no_grad():
             batch_preds = service.model(batch_tensor).cpu().numpy().flatten()
 
-        predicted_ruls = [None] * n_cycles
+        predicted_ruls: list[float | None] = [None] * n_cycles
         for s, pred in zip(scaled_sequences, batch_preds):
-            predicted_ruls[s[1]] = float(pred)
+            idx = int(s[1])
+            if 0 <= idx < n_cycles:
+                predicted_ruls[idx] = float(pred)
 
         last_idx = -1
         for i in range(n_cycles):
@@ -803,8 +920,9 @@ def engine_history() -> Any:
                 if last_idx != -1 and i - last_idx > 1:
                     start_val = predicted_ruls[last_idx]
                     end_val = predicted_ruls[i]
-                    for j in range(last_idx + 1, i):
-                        predicted_ruls[j] = start_val + (end_val - start_val) * (j - last_idx) / (i - last_idx)
+                    if start_val is not None and end_val is not None:
+                        for j in range(last_idx + 1, i):
+                            predicted_ruls[j] = start_val + (end_val - start_val) * (j - last_idx) / (i - last_idx)
                 last_idx = i
 
         return jsonify({
@@ -838,11 +956,13 @@ def static_pages(filename: str) -> Any:
 @app.get("/api/explain")
 def api_explain() -> Any:
     # Use first 50 samples for speed
+    if not HAS_CAPTUM or IntegratedGradients is None:
+        return jsonify({"error": "Captum not installed"}), 400
+    
     X_test_tensor = service._test_cache["X_test_tensor"]
     samples = X_test_tensor[:50].requires_grad_()
     
-    from captum.attr import IntegratedGradients
-    ig = IntegratedGradients(service.model)
+    ig = IntegratedGradients(service.model)  # type: ignore
     baseline = torch.zeros_like(samples)
     attributions, _ = ig.attribute(samples, baseline, return_convergence_delta=True)
     # Average over batch and sequence dimension
