@@ -260,7 +260,7 @@
         </div>
 
         <!-- Fleet Health Heatmap (NEW) -->
-        <div class="bg-zinc-950 border border-zinc-800 rounded-xl p-5 lg:col-span-1">
+        <div class="bg-zinc-950 border border-zinc-800 rounded-xl p-5">
           <div class="flex justify-between items-center mb-4">
             <div>
               <span class="text-xs font-bold uppercase tracking-widest text-orange-500">Fleet Sensor Heatmap</span>
@@ -272,12 +272,12 @@
               <div class="w-2 h-2 bg-orange-500 rounded-full"></div>
             </div>
           </div>
-          <div id="heatmap-container" class="grid grid-cols-21 gap-1 h-32">
+          <div id="heatmap-container" class="grid gap-1 h-32" style="grid-template-columns: repeat(21, minmax(0, 1fr)); grid-auto-rows: minmax(0, 1fr);">
             <script>
               for(let i=0; i<21*10; i++) {
                 const intensity = Math.random();
                 const color = intensity > 0.8 ? 'bg-orange-500' : (intensity > 0.4 ? 'bg-orange-900/40' : 'bg-zinc-900');
-                document.write(`<div class="${color} rounded-sm" title="Sensor ${i%21 + 1}"></div>`);
+                document.write(`<div class="${color} rounded-sm min-h-0" title="Sensor ${i%21 + 1}"></div>`);
               }
             </script>
           </div>
